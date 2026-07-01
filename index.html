@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>订单货架三消原型</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="topbar" aria-label="游戏状态">
+        <div>
+          <p class="label">关卡</p>
+          <strong id="levelText">1</strong>
+        </div>
+        <div>
+          <p class="label">订单</p>
+          <strong id="itemsText">0/8</strong>
+        </div>
+        <div>
+          <p class="label">时间</p>
+          <strong id="timeText">60</strong>
+        </div>
+      </section>
+
+      <canvas id="game" width="720" height="1080" aria-label="订单货架三消游戏画布"></canvas>
+
+      <section class="controls" aria-label="游戏操作">
+        <button id="restartBtn" type="button">重开</button>
+        <button id="hintBtn" type="button">提示</button>
+        <button id="reviveBtn" type="button">卡槽+1</button>
+      </section>
+    </main>
+
+    <div id="overlay" class="overlay is-hidden" role="dialog" aria-modal="true">
+      <div class="modal">
+        <p id="modalKicker" class="label">结果</p>
+        <h1 id="modalTitle">通关</h1>
+        <p id="modalBody">继续下一关。</p>
+        <div class="modalActions">
+          <button id="secondaryBtn" type="button">重开</button>
+          <button id="primaryBtn" type="button">下一关</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="game.js"></script>
+  </body>
+</html>
