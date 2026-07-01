@@ -34,10 +34,5 @@
 
 ## 运行
 
-直接用浏览器打开 `index.html` 即可。也可以用本地静态服务打开：
-
-```powershell
-python -m http.server 5173
-```
-
-然后访问 `http://localhost:5173`。
+直接用浏览器打开 `index.html` 即可。
+https://astroloneko.github.io/Match-3/
