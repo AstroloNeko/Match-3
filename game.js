@@ -24,6 +24,23 @@ const ORDER_COUNT = 3;
 const cellW = shelf.w / shelf.cols;
 const cellH = shelf.h / shelf.rows;
 
+function levelConfig(levelNumber) {
+  const tier = Math.min(levelNumber, 12);
+  return {
+    typeCount: Math.min(4 + Math.floor(tier / 2), itemTypes.length),
+    targetOrders: 6 + levelNumber + Math.floor(tier / 2),
+    timeLimit: Math.max(54, 92 - tier * 3),
+    refillTarget: Math.min(24 + tier * 2, 40),
+    baseTriples: Math.min(5 + tier, 13),
+    obstruction: 0.14 + Math.min(tier, 8) * 0.035,
+    directorStrength: Math.max(0.35, 0.78 - tier * 0.045),
+    rushChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.42),
+    bulkChance: levelNumber < 3 ? 0 : Math.min(0.08 + tier * 0.025, 0.32),
+    dualChance: levelNumber < 4 ? 0 : Math.min(0.06 + tier * 0.025, 0.28),
+    rushPatience: Math.max(18, 34 - tier)
+  };
+}
+
 const itemTypes = [
   { id: "cup", label: "杯", color: "#e85d4f", icon: "C" },
   { id: "plant", label: "植", color: "#48a868", icon: "P" },
@@ -42,6 +59,8 @@ let orders = [];
 let completedOrders = 0;
 let targetOrders = 8;
 let score = 0;
+let combo = 0;
+let currentConfig = levelConfig(1);
 let timeLeft = 75;
 let lastTick = 0;
 let state = "playing";
@@ -66,7 +85,7 @@ function choice(array) {
 }
 
 function availableTypes() {
-  const count = Math.min(4 + Math.floor(level / 2), itemTypes.length);
+  const count = currentConfig.typeCount;
   return itemTypes.slice(0, count).map((type) => type.id);
 }
 
@@ -82,15 +101,41 @@ function selectableItems() {
   return activeItems().filter((item) => !isBlocked(item));
 }
 
+function orderTypeIds(order) {
+  return order.lines.map((line) => line.typeId);
+}
+
+function allOrderTypeIds() {
+  return orders.flatMap(orderTypeIds);
+}
+
 function createOrder(preferredType) {
   const types = availableTypes();
-  const current = new Set(orders.map((order) => order.typeId));
+  const current = new Set(allOrderTypeIds());
   const options = types.filter((typeId) => !current.has(typeId));
+  const primary = preferredType || choice(options.length ? options : types);
+  const roll = Math.random();
+  let kind = "normal";
+  if (roll < currentConfig.dualChance) {
+    kind = "dual";
+  } else if (roll < currentConfig.dualChance + currentConfig.bulkChance) {
+    kind = "bulk";
+  } else if (roll < currentConfig.dualChance + currentConfig.bulkChance + currentConfig.rushChance) {
+    kind = "rush";
+  }
+
+  const lines = [{ typeId: primary, needed: kind === "bulk" ? 6 : 3, progress: 0 }];
+  if (kind === "dual") {
+    const secondaryOptions = types.filter((typeId) => typeId !== primary);
+    lines.push({ typeId: choice(secondaryOptions), needed: 3, progress: 0 });
+  }
+
   return {
     id: nextOrderId++,
-    typeId: preferredType || choice(options.length ? options : types),
-    needed: 3,
-    progress: 0
+    kind,
+    lines,
+    patience: kind === "rush" ? currentConfig.rushPatience : null,
+    maxPatience: kind === "rush" ? currentConfig.rushPatience : null
   };
 }
 
@@ -120,7 +165,7 @@ function makePlacements(count) {
   const placements = [...base, ...extra];
 
   const lifted = shuffle(placements.filter((cell) => cell.row > 0 && cell.row < shelf.rows - 1 && cell.col > 0 && cell.col < shelf.cols - 1));
-  const liftCount = Math.min(lifted.length, Math.floor(count * (0.16 + Math.min(level, 5) * 0.035)));
+  const liftCount = Math.min(lifted.length, Math.floor(count * currentConfig.obstruction));
   lifted.slice(0, liftCount).forEach((cell, index) => {
     cell.layer = count > 28 && index % 5 === 0 ? 2 : 1;
   });
@@ -133,12 +178,17 @@ function buildInitialItems() {
   const pool = [];
 
   orders.forEach((order) => {
-    pool.push(order.typeId, order.typeId, order.typeId);
+    order.lines.forEach((line) => {
+      for (let i = 0; i < line.needed; i += 1) {
+        pool.push(line.typeId);
+      }
+    });
   });
 
-  const extraTriples = Math.min(5 + level, 10);
+  const extraTriples = currentConfig.baseTriples;
   for (let i = 0; i < extraTriples; i += 1) {
-    const typeId = i < 2 ? orders[i % orders.length].typeId : types[i % types.length];
+    const orderTypes = allOrderTypeIds();
+    const typeId = i < 3 ? orderTypes[i % orderTypes.length] : types[i % types.length];
     pool.push(typeId, typeId, typeId);
   }
 
@@ -148,6 +198,7 @@ function buildInitialItems() {
 
 function startLevel(nextLevel = level) {
   level = nextLevel;
+  currentConfig = levelConfig(level);
   state = "playing";
   overlay.classList.add("is-hidden");
   trayItems = [];
@@ -155,13 +206,14 @@ function startLevel(nextLevel = level) {
   orders = [];
   completedOrders = 0;
   score = 0;
+  combo = 0;
   nextUid = 1;
   nextOrderId = 1;
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
-  targetOrders = 7 + level;
-  timeLeft = Math.max(58, 88 - level * 3);
+  targetOrders = currentConfig.targetOrders;
+  timeLeft = currentConfig.timeLimit;
   message = "";
   messageUntil = 0;
 
@@ -217,19 +269,36 @@ function drawOrders() {
   const startX = (W - cardW * ORDER_COUNT - gap * (ORDER_COUNT - 1)) / 2;
 
   orders.forEach((order, index) => {
-    const type = itemType(order.typeId);
+    const primaryType = itemType(order.lines[0].typeId);
     const x = startX + index * (cardW + gap);
     const y = 122;
     roundRect(x, y, cardW, 86, 14);
     ctx.fillStyle = "#ffffff";
     ctx.fill();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = type.color;
+    ctx.strokeStyle = order.kind === "rush" ? "#e85d4f" : primaryType.color;
     ctx.stroke();
 
-    drawText("订单", x + 16, y + 20, 16, "#6b7886", 700, "left");
-    drawMiniItem(type, x + 48, y + 55, 42);
-    drawText(`${order.progress}/${order.needed}`, x + 126, y + 55, 30, "#22313f", 900);
+    const label = order.kind === "rush" ? "急单" : order.kind === "bulk" ? "大单" : order.kind === "dual" ? "双品" : "订单";
+    drawText(label, x + 16, y + 20, 16, order.kind === "rush" ? "#e85d4f" : "#6b7886", 800, "left");
+
+    if (order.kind === "rush") {
+      const ratio = Math.max(0, order.patience / order.maxPatience);
+      roundRect(x + 104, y + 14, 62, 10, 5);
+      ctx.fillStyle = "#f1e8dc";
+      ctx.fill();
+      roundRect(x + 104, y + 14, 62 * ratio, 10, 5);
+      ctx.fillStyle = ratio < 0.35 ? "#e85d4f" : "#48a868";
+      ctx.fill();
+    }
+
+    order.lines.forEach((line, lineIndex) => {
+      const type = itemType(line.typeId);
+      const itemX = x + 42 + lineIndex * 76;
+      const textX = itemX + 42;
+      drawMiniItem(type, itemX, y + 57, 38);
+      drawText(`${line.progress}/${line.needed}`, textX, y + 57, 23, "#22313f", 900);
+    });
   });
 }
 
@@ -423,6 +492,19 @@ function render(now = performance.now()) {
   drawMessages(now);
 }
 
+function updateOrders(dt) {
+  orders.forEach((order) => {
+    if (order.kind !== "rush" || state !== "playing") return;
+    order.patience -= dt;
+    if (order.patience <= 0) {
+      timeLeft = Math.max(0, timeLeft - 8);
+      toast("急单超时，扣 8 秒");
+      replaceOrder(order);
+      stabilizeBoard();
+    }
+  });
+}
+
 function gameLoop(now) {
   if (!lastTick) lastTick = now;
   const dt = Math.min(0.05, (now - lastTick) / 1000);
@@ -430,6 +512,7 @@ function gameLoop(now) {
 
   if (state === "playing") {
     timeLeft -= dt;
+    updateOrders(dt);
     if (timeLeft <= 0) {
       timeLeft = 0;
       fail("顾客等太久了");
@@ -468,7 +551,11 @@ function hitItem(point) {
 }
 
 function orderForType(typeId) {
-  return orders.find((order) => order.typeId === typeId);
+  return orders.find((order) => order.lines.some((line) => line.typeId === typeId && line.progress < line.needed));
+}
+
+function isOrderComplete(order) {
+  return order.lines.every((line) => line.progress >= line.needed);
 }
 
 function addToTray(item) {
@@ -518,16 +605,28 @@ function resolveShipment(typeId) {
   burst(typeId);
 
   if (order) {
-    order.progress += 3;
-    score += 100 + level * 12;
-    completedOrders += 1;
-    toast(`完成 ${itemType(typeId).label} 订单`);
-    const newOrder = replaceOrder(order);
-    refillShelf([newOrder?.typeId, orders[0].typeId]);
-    timeLeft += 4;
+    const line = order.lines.find((entry) => entry.typeId === typeId && entry.progress < entry.needed);
+    line.progress = Math.min(line.needed, line.progress + 3);
+    score += 45 + level * 8 + combo * 8;
+
+    if (isOrderComplete(order)) {
+      combo += 1;
+      completedOrders += 1;
+      const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
+      score += 90 + bonus + combo * 15;
+      toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
+      const newOrder = replaceOrder(order);
+      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])]);
+      timeLeft += order.kind === "rush" ? 6 : 3;
+    } else {
+      toast(`${itemType(typeId).label} 已出货，还差一项`);
+      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId]);
+    }
   } else {
+    combo = 0;
     score += 25;
-    toast("清出一组散货");
+    timeLeft = Math.max(0, timeLeft - Math.min(5, 2 + Math.floor(level / 3)));
+    toast("散货出库，顾客有点急了");
   }
 
   if (completedOrders >= targetOrders) {
@@ -559,18 +658,21 @@ function preferredRefillType() {
 function refillShelf(priorityTypes = []) {
   const types = availableTypes();
   const pool = [];
-  const needed = Math.max(6, 24 - activeItems().length);
+  const needed = Math.max(6, currentConfig.refillTarget - activeItems().length);
 
   priorityTypes.forEach((typeId) => {
     if (typeId) pool.push(typeId, typeId, typeId);
   });
 
   orders.forEach((order) => {
-    pool.push(order.typeId);
+    order.lines.forEach((line) => {
+      pool.push(line.typeId);
+    });
   });
 
   while (pool.length < needed) {
-    const typeId = Math.random() < 0.58 ? choice(orders).typeId : choice(types);
+    const orderTypes = allOrderTypeIds();
+    const typeId = Math.random() < 0.5 + currentConfig.directorStrength * 0.22 ? choice(orderTypes) : choice(types);
     pool.push(typeId);
   }
 
@@ -589,13 +691,14 @@ function stabilizeBoard() {
   }
 
   const wanted = wantedType();
-  if (wanted && !selectable.some((item) => item.typeId === wanted)) {
+  const shouldIntervene = Math.random() < currentConfig.directorStrength || trayItems.length >= tray.slots - 2;
+  if (wanted && shouldIntervene && !selectable.some((item) => item.typeId === wanted)) {
     choice(selectable).typeId = wanted;
   }
 
-  const orderTypes = new Set(orders.map((order) => order.typeId));
+  const orderTypes = new Set(allOrderTypeIds());
   if (!selectableItems().some((item) => orderTypes.has(item.typeId))) {
-    choice(selectableItems()).typeId = choice(orders).typeId;
+    choice(selectableItems()).typeId = choice(allOrderTypeIds());
   }
 }
 
@@ -611,7 +714,7 @@ function wantedType() {
     if (count === 1 && orderForType(typeId)) return typeId;
   }
 
-  return orders[0]?.typeId;
+  return orders[0]?.lines[0].typeId;
 }
 
 function burst(typeId) {
