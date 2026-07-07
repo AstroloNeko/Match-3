@@ -17,6 +17,8 @@ const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
 const tutorialBtn = document.getElementById("tutorialBtn");
 const tutorialPanel = document.getElementById("tutorialPanel");
+const difficultyOverlay = document.getElementById("difficultyOverlay");
+const difficultyBtn = document.getElementById("difficultyBtn");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -111,6 +113,7 @@ let nextOrderId = 1;
 let message = "";
 let messageUntil = 0;
 let lastShipmentHadBonus = false;
+let bombDrag = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
 let confetti = [];
@@ -308,6 +311,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   configureShelf(currentConfig);
   state = startState;
   overlay.classList.add("is-hidden");
+  difficultyOverlay.classList.add("is-hidden");
   trayItems = [];
   tray.slots = BASE_TRAY_SLOTS;
   orders = [];
@@ -319,6 +323,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
+  bombDrag = null;
   targetOrders = currentConfig.targetOrders;
   timeLeft = currentConfig.timeLimit;
   message = "";
@@ -633,9 +638,14 @@ function drawTray() {
   }
 
   trayItems.forEach((item, index) => {
+    if (bombDrag && bombDrag.index === index) return;
     const x = tray.x + index * slotW + slotW / 2;
     drawItem({ ...item, layer: 0, inTray: true }, x, tray.y + tray.h / 2, 56);
   });
+
+  if (bombDrag) {
+    drawItem({ ...bombDrag.item, layer: 0, inTray: true }, bombDrag.x, bombDrag.y, 60, 0.92);
+  }
 }
 
 function drawMessages(now) {
@@ -726,6 +736,41 @@ function hitItem(point) {
   return null;
 }
 
+function trayItemCenter(index) {
+  const slotW = tray.w / tray.slots;
+  return {
+    x: tray.x + index * slotW + slotW / 2,
+    y: tray.y + tray.h / 2
+  };
+}
+
+function hitTrayItem(point) {
+  for (let index = trayItems.length - 1; index >= 0; index -= 1) {
+    const center = trayItemCenter(index);
+    if (Math.abs(point.x - center.x) <= 36 && Math.abs(point.y - center.y) <= 42) {
+      return { item: trayItems[index], index };
+    }
+  }
+  return null;
+}
+
+function useBombOnTray(targetIndex) {
+  if (!bombDrag || targetIndex === bombDrag.index || !trayItems[targetIndex]) {
+    bombDrag = null;
+    return;
+  }
+
+  const first = Math.max(bombDrag.index, targetIndex);
+  const second = Math.min(bombDrag.index, targetIndex);
+  trayItems.splice(first, 1);
+  trayItems.splice(second, 1);
+  score += 25;
+  toast("炸弹清掉了目标货物");
+  bombDrag = null;
+  checkMatches();
+  updateHud();
+}
+
 function orderForType(typeId) {
   return orders
     .filter((order) => order.lines.some((line) => line.typeId === typeId && line.progress < line.needed))
@@ -799,6 +844,7 @@ function checkMatches() {
   const counts = new Map();
   trayItems.forEach((item) => {
     if (item.frozenMatches > 0) return;
+    if (item.variant === "bomb") return;
     counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
   });
 
@@ -807,7 +853,7 @@ function checkMatches() {
       let removed = 0;
       const removedItems = [];
       trayItems = trayItems.filter((item) => {
-        if (item.typeId === typeId && item.frozenMatches <= 0 && removed < 3) {
+        if (item.typeId === typeId && item.variant !== "bomb" && item.frozenMatches <= 0 && removed < 3) {
           removed += 1;
           removedItems.push(item);
           return false;
@@ -839,7 +885,6 @@ function thawFrozenByMatch() {
 function resolveShipment(typeId, shippedItems = []) {
   const order = orderForType(typeId);
   lastShipmentHadBonus = shippedItems.some((item) => item.variant === "bonus");
-  const bombCount = shippedItems.filter((item) => item.variant === "bomb").length;
   burst(typeId);
 
   if (order) {
@@ -867,25 +912,9 @@ function resolveShipment(typeId, shippedItems = []) {
     toast("散货出库，顾客有点急了");
   }
 
-  if (bombCount > 0) {
-    clearTrayJunk(bombCount);
-  }
-
   if (completedOrders >= targetOrders) {
     win();
   }
-}
-
-function clearTrayJunk(count) {
-  for (let i = 0; i < count; i += 1) {
-    const junkIndex = trayItems.findIndex((item) => item.frozenMatches <= 0 && !orderForType(item.typeId));
-    const fallbackIndex = trayItems.findIndex((item) => item.frozenMatches <= 0);
-    const index = junkIndex >= 0 ? junkIndex : fallbackIndex;
-    if (index === -1) return;
-    trayItems.splice(index, 1);
-    score += 15;
-  }
-  toast("炸弹清掉了暂存槽杂货");
 }
 
 function replaceOrder(doneOrder) {
@@ -1063,7 +1092,18 @@ function shakeBlocked(item) {
 
 canvas.addEventListener("pointerdown", (event) => {
   if (state !== "playing") return;
-  const item = hitItem(canvasPoint(event));
+  const point = canvasPoint(event);
+  const trayHit = hitTrayItem(point);
+  if (trayHit?.item.variant === "bomb") {
+    bombDrag = { item: trayHit.item, index: trayHit.index, x: point.x, y: point.y };
+    if (canvas.setPointerCapture) {
+      canvas.setPointerCapture(event.pointerId);
+    }
+    toast("拖动炸弹到要清除的卡上");
+    return;
+  }
+
+  const item = hitItem(point);
   if (!item) return;
 
   if (isBlocked(item)) {
@@ -1072,6 +1112,23 @@ canvas.addEventListener("pointerdown", (event) => {
   }
 
   addToTray(item);
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!bombDrag) return;
+  const point = canvasPoint(event);
+  bombDrag.x = Math.max(32, Math.min(W - 32, point.x));
+  bombDrag.y = Math.max(32, Math.min(H - 32, point.y));
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  if (!bombDrag) return;
+  const target = hitTrayItem(canvasPoint(event));
+  useBombOnTray(target ? target.index : -1);
+});
+
+canvas.addEventListener("pointercancel", () => {
+  bombDrag = null;
 });
 
 restartBtn.addEventListener("click", () => startLevel(level));
@@ -1087,13 +1144,19 @@ tutorialBtn.addEventListener("click", () => {
 
 primaryBtn.addEventListener("click", () => {
   if (state === "won") {
-    startLevel(level + 1);
+    if (level === 1) {
+      overlay.classList.add("is-hidden");
+      difficultyOverlay.classList.remove("is-hidden");
+    } else {
+      startLevel(level + 1);
+    }
   } else {
     rewardSlot();
   }
 });
 
 secondaryBtn.addEventListener("click", () => startLevel(level));
+difficultyBtn.addEventListener("click", () => startLevel(2));
 
 startLevel(1, "menu");
 requestAnimationFrame(gameLoop);

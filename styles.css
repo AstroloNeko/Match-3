@@ -102,7 +102,8 @@ button:active {
 
 #reviveBtn,
 #primaryBtn,
-#startBtn {
+#startBtn,
+#difficultyBtn {
   background: var(--accent);
 }
 
@@ -112,6 +113,7 @@ button:active {
 }
 
 .startOverlay,
+.difficultyOverlay,
 .overlay {
   position: fixed;
   inset: 0;
@@ -123,17 +125,40 @@ button:active {
 }
 
 .startOverlay.is-hidden,
+.difficultyOverlay.is-hidden,
 .overlay.is-hidden {
   display: none;
 }
 
 .startPanel,
+.difficultyPanel,
 .modal {
   width: min(100%, 360px);
   padding: 22px;
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+.difficultyPanel {
+  width: min(100%, 380px);
+  text-align: center;
+  animation: floatIn 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.difficultyPanel h1 {
+  margin: 0 0 10px;
+  font-size: 30px;
+}
+
+.difficultyPanel p:not(.label) {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.difficultyPanel button {
+  width: 100%;
+  margin-top: 12px;
 }
 
 .startPanel {
@@ -202,6 +227,17 @@ button:active {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+@keyframes floatIn {
+  from {
+    opacity: 0;
+    transform: translateY(34px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @media (max-width: 360px) {
