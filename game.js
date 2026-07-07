@@ -13,6 +13,10 @@ const secondaryBtn = document.getElementById("secondaryBtn");
 const restartBtn = document.getElementById("restartBtn");
 const hintBtn = document.getElementById("hintBtn");
 const reviveBtn = document.getElementById("reviveBtn");
+const startOverlay = document.getElementById("startOverlay");
+const startBtn = document.getElementById("startBtn");
+const tutorialBtn = document.getElementById("tutorialBtn");
+const tutorialPanel = document.getElementById("tutorialPanel");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -101,7 +105,7 @@ let combo = 0;
 let currentConfig = levelConfig(1);
 let timeLeft = 75;
 let lastTick = 0;
-let state = "playing";
+let state = "menu";
 let nextUid = 1;
 let nextOrderId = 1;
 let message = "";
@@ -298,11 +302,11 @@ function buildInitialItems() {
   applyLinkedPairs(items);
 }
 
-function startLevel(nextLevel = level) {
+function startLevel(nextLevel = level, startState = "playing") {
   level = nextLevel;
   currentConfig = levelConfig(level);
   configureShelf(currentConfig);
-  state = "playing";
+  state = startState;
   overlay.classList.add("is-hidden");
   trayItems = [];
   tray.slots = BASE_TRAY_SLOTS;
@@ -571,6 +575,44 @@ function drawItems() {
     });
 }
 
+function drawLinkedChains() {
+  const active = activeItems();
+  const byUid = new Map(active.map((item) => [item.uid, item]));
+  const drawn = new Set();
+
+  active.forEach((item) => {
+    if (item.variant !== "linked" || !item.linkedUid || drawn.has(item.uid)) return;
+    const mate = byUid.get(item.linkedUid);
+    if (!mate) return;
+
+    drawn.add(item.uid);
+    drawn.add(mate.uid);
+
+    const a = itemCenter(item);
+    const b = itemCenter(mate);
+    ctx.save();
+    ctx.setLineDash([10, 8]);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(156, 106, 222, 0.78)";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    [a, b].forEach((point) => {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = "#9c6ade";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    });
+    ctx.restore();
+  });
+}
+
 function drawTray() {
   const slotW = tray.w / tray.slots;
   roundRect(tray.x, tray.y, tray.w, tray.h, 22);
@@ -619,6 +661,7 @@ function drawConfetti() {
 function render(now = performance.now()) {
   drawBackground();
   drawShelf();
+  drawLinkedChains();
   drawItems();
   drawTray();
   drawConfetti();
@@ -1034,6 +1077,13 @@ canvas.addEventListener("pointerdown", (event) => {
 restartBtn.addEventListener("click", () => startLevel(level));
 hintBtn.addEventListener("click", showHint);
 reviveBtn.addEventListener("click", rewardSlot);
+startBtn.addEventListener("click", () => {
+  startOverlay.classList.add("is-hidden");
+  startLevel(1);
+});
+tutorialBtn.addEventListener("click", () => {
+  tutorialPanel.classList.toggle("is-hidden");
+});
 
 primaryBtn.addEventListener("click", () => {
   if (state === "won") {
@@ -1045,5 +1095,5 @@ primaryBtn.addEventListener("click", () => {
 
 secondaryBtn.addEventListener("click", () => startLevel(level));
 
-startLevel(1);
+startLevel(1, "menu");
 requestAnimationFrame(gameLoop);

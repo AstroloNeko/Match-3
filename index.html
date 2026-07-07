@@ -32,6 +32,46 @@
       </section>
     </main>
 
+    <div id="startOverlay" class="startOverlay" role="dialog" aria-modal="true">
+      <div class="startPanel">
+        <p class="label">Match-3 prototype</p>
+        <h1>订单货架</h1>
+        <p class="intro">按订单凑三消出货。第一关很轻，第二关开始货架、订单和特殊货物会突然加压。</p>
+        <div class="startActions">
+          <button id="startBtn" type="button">开始游戏</button>
+          <button id="tutorialBtn" type="button">玩法教程</button>
+        </div>
+        <section id="tutorialPanel" class="tutorialPanel is-hidden" aria-label="玩法教程">
+          <div class="tutorialGrid">
+            <article>
+              <strong>订单</strong>
+              <p>上方 3 个订单指定出货目标。三个同类货物会自动出货，匹配订单就推进进度。</p>
+            </article>
+            <article>
+              <strong>遮挡</strong>
+              <p>灰色带锁货物被上层压住，先拿走上层才能选择。</p>
+            </article>
+            <article>
+              <strong>星标 +</strong>
+              <p>参与订单出货时，额外加分并奖励时间。</p>
+            </article>
+            <article>
+              <strong>冰冻 冰</strong>
+              <p>进槽后需要经历若干次三消才解冻，冻结期间占槽且不参与三消。</p>
+            </article>
+            <article>
+              <strong>炸弹 !</strong>
+              <p>参与三消后，会清掉暂存槽里的一个散货，适合救场。</p>
+            </article>
+            <article>
+              <strong>捆绑 链</strong>
+              <p>两件货物之间会显示紫色链条。点其中一个，另一个也会一起进槽。</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+
     <div id="overlay" class="overlay is-hidden" role="dialog" aria-modal="true">
       <div class="modal">
         <p id="modalKicker" class="label">结果</p>

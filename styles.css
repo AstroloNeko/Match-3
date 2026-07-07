@@ -101,14 +101,17 @@ button:active {
 }
 
 #reviveBtn,
-#primaryBtn {
+#primaryBtn,
+#startBtn {
   background: var(--accent);
 }
 
-#secondaryBtn {
+#secondaryBtn,
+#tutorialBtn {
   background: #66717d;
 }
 
+.startOverlay,
 .overlay {
   position: fixed;
   inset: 0;
@@ -119,10 +122,12 @@ button:active {
   backdrop-filter: blur(6px);
 }
 
+.startOverlay.is-hidden,
 .overlay.is-hidden {
   display: none;
 }
 
+.startPanel,
 .modal {
   width: min(100%, 360px);
   padding: 22px;
@@ -131,21 +136,72 @@ button:active {
   box-shadow: var(--shadow);
 }
 
+.startPanel {
+  width: min(100%, 430px);
+  max-height: min(92vh, 760px);
+  overflow: auto;
+}
+
+.startPanel h1,
 .modal h1 {
   margin: 0 0 8px;
   font-size: 28px;
   line-height: 1.1;
 }
 
+.intro {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .modal p {
   margin-top: 0;
 }
 
+.startActions,
 .modalActions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 18px;
+}
+
+.tutorialPanel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tutorialPanel.is-hidden {
+  display: none;
+}
+
+.tutorialGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tutorialGrid article {
+  min-height: 112px;
+  padding: 12px;
+  border: 1px solid #e2d8c9;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.tutorialGrid strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.tutorialGrid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 @media (max-width: 360px) {
@@ -155,5 +211,9 @@ button:active {
 
   strong {
     font-size: 21px;
+  }
+
+  .tutorialGrid {
+    grid-template-columns: 1fr;
   }
 }
