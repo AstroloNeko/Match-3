@@ -42,7 +42,10 @@ function levelConfig(levelNumber) {
     rushChance: levelNumber < 2 ? 0.08 : Math.min(0.18 + tier * 0.04, 0.58),
     bulkChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.44),
     dualChance: levelNumber < 3 ? 0 : Math.min(0.1 + tier * 0.035, 0.4),
-    rushPatience: Math.max(13, 30 - tier * 1.4)
+    rushPatience: Math.max(13, 30 - tier * 1.4),
+    bonusItemChance: Math.min(0.05 + tier * 0.012, 0.18),
+    frozenItemChance: levelNumber < 2 ? 0 : Math.min(0.035 + tier * 0.014, 0.18),
+    bombItemChance: levelNumber < 3 ? 0 : Math.min(0.025 + tier * 0.01, 0.12)
   };
 }
 
@@ -73,6 +76,7 @@ let nextUid = 1;
 let nextOrderId = 1;
 let message = "";
 let messageUntil = 0;
+let lastShipmentHadBonus = false;
 let pulseItems = new Set();
 let shakeItems = new Set();
 let confetti = [];
@@ -155,12 +159,22 @@ function createItem(typeId, placement) {
   return {
     uid: `item-${nextUid++}`,
     typeId,
+    variant: chooseItemVariant(),
+    frozenLeft: 0,
     row: placement.row,
     col: placement.col,
     layer: placement.layer,
     z: nextUid,
     cleared: false
   };
+}
+
+function chooseItemVariant() {
+  const roll = Math.random();
+  if (roll < currentConfig.bombItemChance) return "bomb";
+  if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance) return "frozen";
+  if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
+  return "normal";
 }
 
 function cellKey(row, col) {
@@ -437,6 +451,7 @@ function itemHitOrder(a, b) {
 function drawItem(item, x, y, size, alpha = 1) {
   const type = itemType(item.typeId);
   const blocked = item.inTray ? false : isBlocked(item);
+  const frozen = item.frozenLeft > 0;
   const pulsing = pulseItems.has(item.uid);
   const shaking = shakeItems.has(item.uid);
   const shake = shaking ? Math.sin(performance.now() / 36) * 5 : 0;
@@ -455,7 +470,15 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.shadowColor = "transparent";
 
   ctx.lineWidth = blocked ? 4 : 5;
-  ctx.strokeStyle = blocked ? "rgba(72, 84, 96, 0.44)" : "rgba(255,255,255,0.75)";
+  ctx.strokeStyle = blocked
+    ? "rgba(72, 84, 96, 0.44)"
+    : item.variant === "bonus"
+      ? "#ffe27a"
+      : item.variant === "bomb"
+        ? "#22313f"
+        : frozen || item.variant === "frozen"
+          ? "#aee8ff"
+          : "rgba(255,255,255,0.75)";
   ctx.stroke();
 
   ctx.fillStyle = blocked ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.92)";
@@ -468,6 +491,23 @@ function drawItem(item, x, y, size, alpha = 1) {
 
   if (blocked) {
     drawText("锁", size * 0.26, -size * 0.27, size * 0.22, "#ffffff", 900);
+  }
+
+  if (!blocked && item.variant && item.variant !== "normal") {
+    const badge = item.variant === "bonus" ? "+" : item.variant === "bomb" ? "!" : "冰";
+    const badgeColor = item.variant === "bonus" ? "#f2b84b" : item.variant === "bomb" ? "#22313f" : "#3f82d7";
+    ctx.beginPath();
+    ctx.arc(size * 0.31, -size * 0.31, size * 0.17, 0, Math.PI * 2);
+    ctx.fillStyle = badgeColor;
+    ctx.fill();
+    drawText(badge, size * 0.31, -size * 0.31, size * 0.2, "#ffffff", 900);
+  }
+
+  if (frozen) {
+    roundRect(-size / 2 + 5, -size / 2 + 5, size - 10, size - 10, 12);
+    ctx.fillStyle = "rgba(173, 232, 255, 0.32)";
+    ctx.fill();
+    drawText(`${Math.ceil(item.frozenLeft)}`, 0, 0, size * 0.34, "#ffffff", 900);
   }
 
   ctx.restore();
@@ -550,6 +590,20 @@ function updateOrders(dt) {
   });
 }
 
+function updateTrayItems(dt) {
+  let thawed = false;
+  trayItems.forEach((item) => {
+    if (item.frozenLeft > 0) {
+      item.frozenLeft = Math.max(0, item.frozenLeft - dt);
+      if (item.frozenLeft === 0) thawed = true;
+    }
+  });
+  if (thawed) {
+    toast("冰冻货解冻了");
+    checkMatches();
+  }
+}
+
 function gameLoop(now) {
   if (!lastTick) lastTick = now;
   const dt = Math.min(0.05, (now - lastTick) / 1000);
@@ -558,6 +612,7 @@ function gameLoop(now) {
   if (state === "playing") {
     timeLeft -= dt;
     updateOrders(dt);
+    updateTrayItems(dt);
     if (timeLeft <= 0) {
       timeLeft = 0;
       fail("顾客等太久了");
@@ -631,7 +686,12 @@ function addToTray(item) {
   }
 
   item.cleared = true;
-  trayItems.push({ ...item, scale: 1 });
+  const trayItem = { ...item, scale: 1 };
+  if (trayItem.variant === "frozen") {
+    trayItem.frozenLeft = Math.max(2.5, 5 - level * 0.15);
+    toast("冰冻货占住卡槽，稍后解冻");
+  }
+  trayItems.push(trayItem);
   const matched = checkMatches();
   const lowStockThreshold = Math.max(14, Math.floor(currentConfig.refillTarget * 0.42));
   if (!matched && activeItems().length < lowStockThreshold) {
@@ -648,28 +708,33 @@ function addToTray(item) {
 function checkMatches() {
   const counts = new Map();
   trayItems.forEach((item) => {
+    if (item.frozenLeft > 0) return;
     counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
   });
 
   for (const [typeId, count] of counts) {
     if (count >= 3) {
       let removed = 0;
+      const removedItems = [];
       trayItems = trayItems.filter((item) => {
-        if (item.typeId === typeId && removed < 3) {
+        if (item.typeId === typeId && item.frozenLeft <= 0 && removed < 3) {
           removed += 1;
+          removedItems.push(item);
           return false;
         }
         return true;
       });
-      resolveShipment(typeId);
+      resolveShipment(typeId, removedItems);
       return true;
     }
   }
   return false;
 }
 
-function resolveShipment(typeId) {
+function resolveShipment(typeId, shippedItems = []) {
   const order = orderForType(typeId);
+  lastShipmentHadBonus = shippedItems.some((item) => item.variant === "bonus");
+  const bombCount = shippedItems.filter((item) => item.variant === "bomb").length;
   burst(typeId);
 
   if (order) {
@@ -681,11 +746,11 @@ function resolveShipment(typeId) {
       combo += 1;
       completedOrders += 1;
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
-      score += 90 + bonus + combo * 15;
+      score += 90 + bonus + combo * 15 + (lastShipmentHadBonus ? 45 : 0);
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
       const newOrder = replaceOrder(order);
       refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], Math.min(8, 5 + Math.floor(level / 4)));
-      timeLeft += order.kind === "rush" ? 6 : 3;
+      timeLeft += (order.kind === "rush" ? 6 : 3) + (lastShipmentHadBonus ? 3 : 0);
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
       refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], Math.min(5, 3 + Math.floor(level / 5)));
@@ -697,9 +762,25 @@ function resolveShipment(typeId) {
     toast("散货出库，顾客有点急了");
   }
 
+  if (bombCount > 0) {
+    clearTrayJunk(bombCount);
+  }
+
   if (completedOrders >= targetOrders) {
     win();
   }
+}
+
+function clearTrayJunk(count) {
+  for (let i = 0; i < count; i += 1) {
+    const junkIndex = trayItems.findIndex((item) => item.frozenLeft <= 0 && !orderForType(item.typeId));
+    const fallbackIndex = trayItems.findIndex((item) => item.frozenLeft <= 0);
+    const index = junkIndex >= 0 ? junkIndex : fallbackIndex;
+    if (index === -1) return;
+    trayItems.splice(index, 1);
+    score += 15;
+  }
+  toast("炸弹清掉了暂存槽杂货");
 }
 
 function replaceOrder(doneOrder) {
@@ -852,9 +933,12 @@ function showHint() {
   stabilizeBoard();
   const selectable = selectableItems();
   const target = wantedType();
-  const hinted = selectable.filter((item) => item.typeId === target);
+  const hinted =
+    selectable.filter((item) => item.typeId === target).length
+      ? selectable.filter((item) => item.typeId === target)
+      : selectable.filter((item) => item.variant === "bonus" || item.variant === "bomb");
   pulseItems = new Set((hinted.length ? hinted : selectable.slice(0, 2)).map((item) => item.uid));
-  toast(target ? `优先拿 ${itemType(target).label}` : "先解开上层遮挡");
+  toast(target ? `优先拿 ${itemType(target).label}` : "优先拿特殊货或解开遮挡");
   setTimeout(() => {
     pulseItems = new Set();
   }, 1200);
