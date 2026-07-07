@@ -151,6 +151,19 @@ function createItem(typeId, placement) {
   };
 }
 
+function cellKey(row, col) {
+  return `${row}:${col}`;
+}
+
+function occupiedCellLayers() {
+  const layers = new Map();
+  activeItems().forEach((item) => {
+    const key = cellKey(item.row, item.col);
+    layers.set(key, Math.max(layers.get(key) ?? -1, item.layer));
+  });
+  return layers;
+}
+
 function makePlacements(count) {
   const cells = [];
   for (let row = 0; row < shelf.rows; row += 1) {
@@ -171,6 +184,24 @@ function makePlacements(count) {
   });
 
   return shuffle(placements);
+}
+
+function makeRefillPlacements(count) {
+  const occupied = occupiedCellLayers();
+  const candidates = [];
+
+  for (let row = 0; row < shelf.rows; row += 1) {
+    for (let col = 0; col < shelf.cols; col += 1) {
+      const key = cellKey(row, col);
+      const topLayer = occupied.get(key) ?? -1;
+      if (topLayer < 2) {
+        candidates.push({ row, col, layer: topLayer + 1, weight: topLayer + 1 });
+      }
+    }
+  }
+
+  shuffle(candidates).sort((a, b) => a.weight - b.weight);
+  return candidates.slice(0, count).map(({ row, col, layer }) => ({ row, col, layer }));
 }
 
 function buildInitialItems() {
@@ -551,7 +582,28 @@ function hitItem(point) {
 }
 
 function orderForType(typeId) {
-  return orders.find((order) => order.lines.some((line) => line.typeId === typeId && line.progress < line.needed));
+  return orders
+    .filter((order) => order.lines.some((line) => line.typeId === typeId && line.progress < line.needed))
+    .sort((a, b) => orderMatchPriority(b, typeId) - orderMatchPriority(a, typeId))[0];
+}
+
+function orderMatchPriority(order, typeId) {
+  const line = order.lines.find((entry) => entry.typeId === typeId && entry.progress < entry.needed);
+  const urgency =
+    order.kind === "rush" && order.maxPatience
+      ? 90 + (1 - Math.max(0, order.patience) / order.maxPatience) * 35
+      : 0;
+  const partial = line && line.progress > 0 ? 45 : 0;
+  const kind =
+    order.kind === "dual"
+      ? 34
+      : order.kind === "bulk"
+        ? 24
+        : order.kind === "rush"
+          ? 20
+          : 0;
+  const nearDone = line ? (line.progress / line.needed) * 18 : 0;
+  return urgency + partial + kind + nearDone;
 }
 
 function isOrderComplete(order) {
@@ -566,9 +618,9 @@ function addToTray(item) {
 
   item.cleared = true;
   trayItems.push({ ...item, scale: 1 });
-  checkMatches();
-  if (activeItems().length < 12) {
-    refillShelf();
+  const matched = checkMatches();
+  if (!matched && activeItems().length < 12) {
+    refillShelf([], 4);
   }
   stabilizeBoard();
   updateHud();
@@ -595,9 +647,10 @@ function checkMatches() {
         return true;
       });
       resolveShipment(typeId);
-      break;
+      return true;
     }
   }
+  return false;
 }
 
 function resolveShipment(typeId) {
@@ -616,11 +669,11 @@ function resolveShipment(typeId) {
       score += 90 + bonus + combo * 15;
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
       const newOrder = replaceOrder(order);
-      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])]);
+      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], 5);
       timeLeft += order.kind === "rush" ? 6 : 3;
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
-      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId]);
+      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], 3);
     }
   } else {
     combo = 0;
@@ -655,18 +708,20 @@ function preferredRefillType() {
   return selectable.length ? choice(selectable).typeId : choice(availableTypes());
 }
 
-function refillShelf(priorityTypes = []) {
+function refillShelf(priorityTypes = [], maxAdd = 6) {
   const types = availableTypes();
   const pool = [];
-  const needed = Math.max(6, currentConfig.refillTarget - activeItems().length);
+  const stockGap = Math.max(0, currentConfig.refillTarget - activeItems().length);
+  const needed = Math.min(maxAdd, stockGap || Math.min(3, maxAdd));
+  if (needed <= 0) return;
 
   priorityTypes.forEach((typeId) => {
-    if (typeId) pool.push(typeId, typeId, typeId);
+    if (typeId && pool.length < needed) pool.push(typeId);
   });
 
   orders.forEach((order) => {
     order.lines.forEach((line) => {
-      pool.push(line.typeId);
+      if (pool.length < needed) pool.push(line.typeId);
     });
   });
 
@@ -676,9 +731,11 @@ function refillShelf(priorityTypes = []) {
     pool.push(typeId);
   }
 
-  const placements = makePlacements(pool.length);
+  const placements = makeRefillPlacements(pool.length);
   shuffle(pool).forEach((typeId, index) => {
-    items.push(createItem(typeId, placements[index]));
+    if (placements[index]) {
+      items.push(createItem(typeId, placements[index]));
+    }
   });
 }
 
