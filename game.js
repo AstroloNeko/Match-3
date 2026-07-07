@@ -26,28 +26,52 @@ let cellH = shelf.h / shelf.rows;
 
 function levelConfig(levelNumber) {
   const tier = Math.min(levelNumber, 12);
-  const rows = tier < 3 ? 7 : tier < 7 ? 8 : 9;
-  const cols = tier < 2 ? 8 : tier < 5 ? 9 : tier < 9 ? 10 : 11;
+  if (levelNumber === 1) {
+    return {
+      rows: 5,
+      cols: 6,
+      typeCount: 3,
+      targetOrders: 4,
+      timeLimit: 96,
+      refillTarget: 18,
+      baseTriples: 4,
+      obstruction: 0.08,
+      directorStrength: 0.92,
+      rushChance: 0,
+      bulkChance: 0,
+      dualChance: 0,
+      rushPatience: 32,
+      bonusItemChance: 0.04,
+      frozenItemChance: 0,
+      bombItemChance: 0,
+      linkedItemChance: 0,
+      freezeMatches: 2
+    };
+  }
+
+  const spike = tier - 1;
+  const rows = spike < 3 ? 8 : spike < 7 ? 9 : 10;
+  const cols = spike < 2 ? 9 : spike < 5 ? 10 : spike < 9 ? 11 : 12;
   const capacity = rows * cols;
   return {
     rows,
     cols,
-    typeCount: Math.min(4 + Math.floor((tier + 1) / 2), itemTypes.length),
-    targetOrders: 7 + levelNumber * 2 + Math.floor(tier / 2),
-    timeLimit: Math.max(48, 88 - tier * 4),
-    refillTarget: Math.min(Math.floor(capacity * (0.78 + tier * 0.018)), capacity + 12),
-    baseTriples: Math.min(10 + tier * 3, 34),
-    obstruction: 0.26 + Math.min(tier, 10) * 0.05,
-    directorStrength: Math.max(0.16, 0.66 - tier * 0.06),
-    rushChance: levelNumber < 2 ? 0.08 : Math.min(0.18 + tier * 0.04, 0.58),
-    bulkChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.44),
-    dualChance: levelNumber < 3 ? 0 : Math.min(0.1 + tier * 0.035, 0.4),
-    rushPatience: Math.max(13, 30 - tier * 1.4),
-    bonusItemChance: Math.min(0.05 + tier * 0.012, 0.18),
-    frozenItemChance: levelNumber < 2 ? 0 : Math.min(0.035 + tier * 0.014, 0.18),
-    bombItemChance: levelNumber < 3 ? 0 : Math.min(0.025 + tier * 0.01, 0.12),
-    linkedItemChance: levelNumber < 3 ? 0 : Math.min(0.06 + tier * 0.018, 0.22),
-    freezeMatches: Math.min(4, 2 + Math.floor(tier / 5))
+    typeCount: Math.min(5 + Math.floor(spike / 2), itemTypes.length),
+    targetOrders: 8 + levelNumber * 3 + Math.floor(spike / 2),
+    timeLimit: Math.max(36, 64 - spike * 3),
+    refillTarget: Math.min(Math.floor(capacity * (0.82 + spike * 0.018)), capacity + 16),
+    baseTriples: Math.min(14 + spike * 4, 42),
+    obstruction: 0.34 + Math.min(spike, 10) * 0.055,
+    directorStrength: Math.max(0.12, 0.5 - spike * 0.045),
+    rushChance: Math.min(0.34 + spike * 0.045, 0.68),
+    bulkChance: Math.min(0.18 + spike * 0.04, 0.5),
+    dualChance: Math.min(0.14 + spike * 0.04, 0.46),
+    rushPatience: Math.max(10, 22 - spike * 1.2),
+    bonusItemChance: Math.min(0.06 + spike * 0.012, 0.18),
+    frozenItemChance: Math.min(0.08 + spike * 0.018, 0.24),
+    bombItemChance: Math.min(0.035 + spike * 0.012, 0.14),
+    linkedItemChance: Math.min(0.1 + spike * 0.022, 0.3),
+    freezeMatches: Math.min(5, 2 + Math.floor(spike / 4))
   };
 }
 
@@ -59,7 +83,11 @@ const itemTypes = [
   { id: "box", label: "盒", color: "#9c6ade", icon: "X" },
   { id: "lamp", label: "灯", color: "#f27a3f", icon: "L" },
   { id: "star", label: "星", color: "#18a7a2", icon: "S" },
-  { id: "shoe", label: "鞋", color: "#7b8794", icon: "U" }
+  { id: "shoe", label: "鞋", color: "#7b8794", icon: "U" },
+  { id: "cake", label: "糕", color: "#d96c9f", icon: "K" },
+  { id: "milk", label: "奶", color: "#5aa7e8", icon: "M" },
+  { id: "toy", label: "玩", color: "#5fbf7f", icon: "T" },
+  { id: "soap", label: "皂", color: "#46b5c8", icon: "Z" }
 ];
 
 let level = 1;
