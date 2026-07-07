@@ -16,28 +16,33 @@ const reviveBtn = document.getElementById("reviveBtn");
 
 const W = canvas.width;
 const H = canvas.height;
-const shelf = { x: 54, y: 238, w: 612, h: 520, rows: 5, cols: 6 };
+const shelf = { x: 40, y: 226, w: 640, h: 560, rows: 6, cols: 7 };
 const tray = { x: 54, y: 825, w: 612, h: 122, slots: 7 };
 const BASE_TRAY_SLOTS = 7;
 const MAX_TRAY_SLOTS = 9;
 const ORDER_COUNT = 3;
-const cellW = shelf.w / shelf.cols;
-const cellH = shelf.h / shelf.rows;
+let cellW = shelf.w / shelf.cols;
+let cellH = shelf.h / shelf.rows;
 
 function levelConfig(levelNumber) {
   const tier = Math.min(levelNumber, 12);
+  const rows = tier < 4 ? 6 : tier < 8 ? 7 : 8;
+  const cols = tier < 3 ? 7 : tier < 6 ? 8 : 9;
+  const capacity = rows * cols;
   return {
-    typeCount: Math.min(4 + Math.floor(tier / 2), itemTypes.length),
-    targetOrders: 6 + levelNumber + Math.floor(tier / 2),
-    timeLimit: Math.max(54, 92 - tier * 3),
-    refillTarget: Math.min(24 + tier * 2, 40),
-    baseTriples: Math.min(5 + tier, 13),
-    obstruction: 0.14 + Math.min(tier, 8) * 0.035,
-    directorStrength: Math.max(0.35, 0.78 - tier * 0.045),
-    rushChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.42),
-    bulkChance: levelNumber < 3 ? 0 : Math.min(0.08 + tier * 0.025, 0.32),
-    dualChance: levelNumber < 4 ? 0 : Math.min(0.06 + tier * 0.025, 0.28),
-    rushPatience: Math.max(18, 34 - tier)
+    rows,
+    cols,
+    typeCount: Math.min(4 + Math.floor((tier + 1) / 2), itemTypes.length),
+    targetOrders: 7 + levelNumber * 2 + Math.floor(tier / 2),
+    timeLimit: Math.max(48, 88 - tier * 4),
+    refillTarget: Math.min(Math.floor(capacity * (0.72 + tier * 0.018)), capacity + 8),
+    baseTriples: Math.min(7 + tier * 2, 24),
+    obstruction: 0.2 + Math.min(tier, 9) * 0.045,
+    directorStrength: Math.max(0.22, 0.72 - tier * 0.055),
+    rushChance: levelNumber < 2 ? 0.08 : Math.min(0.18 + tier * 0.04, 0.58),
+    bulkChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.44),
+    dualChance: levelNumber < 3 ? 0 : Math.min(0.1 + tier * 0.035, 0.4),
+    rushPatience: Math.max(13, 30 - tier * 1.4)
   };
 }
 
@@ -99,6 +104,13 @@ function activeItems() {
 
 function selectableItems() {
   return activeItems().filter((item) => !isBlocked(item));
+}
+
+function configureShelf(config) {
+  shelf.rows = config.rows;
+  shelf.cols = config.cols;
+  cellW = shelf.w / shelf.cols;
+  cellH = shelf.h / shelf.rows;
 }
 
 function orderTypeIds(order) {
@@ -180,7 +192,7 @@ function makePlacements(count) {
   const lifted = shuffle(placements.filter((cell) => cell.row > 0 && cell.row < shelf.rows - 1 && cell.col > 0 && cell.col < shelf.cols - 1));
   const liftCount = Math.min(lifted.length, Math.floor(count * currentConfig.obstruction));
   lifted.slice(0, liftCount).forEach((cell, index) => {
-    cell.layer = count > 28 && index % 5 === 0 ? 2 : 1;
+    cell.layer = count > shelf.rows * shelf.cols * 0.72 && index % 4 === 0 ? 2 : 1;
   });
 
   return shuffle(placements);
@@ -216,7 +228,7 @@ function buildInitialItems() {
     });
   });
 
-  const extraTriples = currentConfig.baseTriples;
+  const extraTriples = Math.min(currentConfig.baseTriples, Math.floor((shelf.rows * shelf.cols) / 2));
   for (let i = 0; i < extraTriples; i += 1) {
     const orderTypes = allOrderTypeIds();
     const typeId = i < 3 ? orderTypes[i % orderTypes.length] : types[i % types.length];
@@ -230,6 +242,7 @@ function buildInitialItems() {
 function startLevel(nextLevel = level) {
   level = nextLevel;
   currentConfig = levelConfig(level);
+  configureShelf(currentConfig);
   state = "playing";
   overlay.classList.add("is-hidden");
   trayItems = [];
@@ -290,7 +303,7 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
 
   drawText("订单货架", W / 2, 52, 40, "#22313f", 800);
-  drawText("凑三消给顾客出单，别把暂存槽塞满", W / 2, 92, 21, "#6b7886", 500);
+  drawText(`凑三消出单，货架 ${shelf.rows}x${shelf.cols}，别把暂存槽塞满`, W / 2, 92, 21, "#6b7886", 500);
   drawOrders();
 }
 
@@ -382,7 +395,8 @@ function itemCenter(item) {
 }
 
 function itemSize(item) {
-  return 62 + item.layer * 3;
+  const base = Math.min(62, Math.min(cellW, cellH) * 0.72);
+  return base + item.layer * 2;
 }
 
 function itemBounds(item) {
@@ -619,8 +633,9 @@ function addToTray(item) {
   item.cleared = true;
   trayItems.push({ ...item, scale: 1 });
   const matched = checkMatches();
-  if (!matched && activeItems().length < 12) {
-    refillShelf([], 4);
+  const lowStockThreshold = Math.max(14, Math.floor(currentConfig.refillTarget * 0.42));
+  if (!matched && activeItems().length < lowStockThreshold) {
+    refillShelf([], Math.min(7, 4 + Math.floor(level / 3)));
   }
   stabilizeBoard();
   updateHud();
@@ -669,11 +684,11 @@ function resolveShipment(typeId) {
       score += 90 + bonus + combo * 15;
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
       const newOrder = replaceOrder(order);
-      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], 5);
+      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], Math.min(8, 5 + Math.floor(level / 4)));
       timeLeft += order.kind === "rush" ? 6 : 3;
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
-      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], 3);
+      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], Math.min(5, 3 + Math.floor(level / 5)));
     }
   } else {
     combo = 0;
