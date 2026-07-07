@@ -26,8 +26,8 @@ let cellH = shelf.h / shelf.rows;
 
 function levelConfig(levelNumber) {
   const tier = Math.min(levelNumber, 12);
-  const rows = tier < 4 ? 6 : tier < 8 ? 7 : 8;
-  const cols = tier < 3 ? 7 : tier < 6 ? 8 : 9;
+  const rows = tier < 3 ? 7 : tier < 7 ? 8 : 9;
+  const cols = tier < 2 ? 8 : tier < 5 ? 9 : tier < 9 ? 10 : 11;
   const capacity = rows * cols;
   return {
     rows,
@@ -35,17 +35,19 @@ function levelConfig(levelNumber) {
     typeCount: Math.min(4 + Math.floor((tier + 1) / 2), itemTypes.length),
     targetOrders: 7 + levelNumber * 2 + Math.floor(tier / 2),
     timeLimit: Math.max(48, 88 - tier * 4),
-    refillTarget: Math.min(Math.floor(capacity * (0.72 + tier * 0.018)), capacity + 8),
-    baseTriples: Math.min(7 + tier * 2, 24),
-    obstruction: 0.2 + Math.min(tier, 9) * 0.045,
-    directorStrength: Math.max(0.22, 0.72 - tier * 0.055),
+    refillTarget: Math.min(Math.floor(capacity * (0.78 + tier * 0.018)), capacity + 12),
+    baseTriples: Math.min(10 + tier * 3, 34),
+    obstruction: 0.26 + Math.min(tier, 10) * 0.05,
+    directorStrength: Math.max(0.16, 0.66 - tier * 0.06),
     rushChance: levelNumber < 2 ? 0.08 : Math.min(0.18 + tier * 0.04, 0.58),
     bulkChance: levelNumber < 2 ? 0 : Math.min(0.12 + tier * 0.035, 0.44),
     dualChance: levelNumber < 3 ? 0 : Math.min(0.1 + tier * 0.035, 0.4),
     rushPatience: Math.max(13, 30 - tier * 1.4),
     bonusItemChance: Math.min(0.05 + tier * 0.012, 0.18),
     frozenItemChance: levelNumber < 2 ? 0 : Math.min(0.035 + tier * 0.014, 0.18),
-    bombItemChance: levelNumber < 3 ? 0 : Math.min(0.025 + tier * 0.01, 0.12)
+    bombItemChance: levelNumber < 3 ? 0 : Math.min(0.025 + tier * 0.01, 0.12),
+    linkedItemChance: levelNumber < 3 ? 0 : Math.min(0.06 + tier * 0.018, 0.22),
+    freezeMatches: Math.min(4, 2 + Math.floor(tier / 5))
   };
 }
 
@@ -160,7 +162,8 @@ function createItem(typeId, placement) {
     uid: `item-${nextUid++}`,
     typeId,
     variant: chooseItemVariant(),
-    frozenLeft: 0,
+    frozenMatches: 0,
+    linkedUid: null,
     row: placement.row,
     col: placement.col,
     layer: placement.layer,
@@ -175,6 +178,19 @@ function chooseItemVariant() {
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance) return "frozen";
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
   return "normal";
+}
+
+function applyLinkedPairs(candidates) {
+  const pool = shuffle(candidates.filter((item) => item.variant === "normal" && !item.linkedUid));
+  const pairTarget = Math.floor(pool.length * currentConfig.linkedItemChance);
+  for (let i = 0; i + 1 < pairTarget; i += 2) {
+    const first = pool[i];
+    const second = pool[i + 1];
+    first.variant = "linked";
+    second.variant = "linked";
+    first.linkedUid = second.uid;
+    second.linkedUid = first.uid;
+  }
 }
 
 function cellKey(row, col) {
@@ -251,6 +267,7 @@ function buildInitialItems() {
 
   const placements = makePlacements(pool.length);
   items = shuffle(pool).map((typeId, index) => createItem(typeId, placements[index]));
+  applyLinkedPairs(items);
 }
 
 function startLevel(nextLevel = level) {
@@ -451,7 +468,7 @@ function itemHitOrder(a, b) {
 function drawItem(item, x, y, size, alpha = 1) {
   const type = itemType(item.typeId);
   const blocked = item.inTray ? false : isBlocked(item);
-  const frozen = item.frozenLeft > 0;
+  const frozen = item.frozenMatches > 0;
   const pulsing = pulseItems.has(item.uid);
   const shaking = shakeItems.has(item.uid);
   const shake = shaking ? Math.sin(performance.now() / 36) * 5 : 0;
@@ -476,9 +493,11 @@ function drawItem(item, x, y, size, alpha = 1) {
       ? "#ffe27a"
       : item.variant === "bomb"
         ? "#22313f"
-        : frozen || item.variant === "frozen"
-          ? "#aee8ff"
-          : "rgba(255,255,255,0.75)";
+        : item.variant === "linked"
+          ? "#9c6ade"
+          : frozen || item.variant === "frozen"
+            ? "#aee8ff"
+            : "rgba(255,255,255,0.75)";
   ctx.stroke();
 
   ctx.fillStyle = blocked ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.92)";
@@ -494,8 +513,9 @@ function drawItem(item, x, y, size, alpha = 1) {
   }
 
   if (!blocked && item.variant && item.variant !== "normal") {
-    const badge = item.variant === "bonus" ? "+" : item.variant === "bomb" ? "!" : "冰";
-    const badgeColor = item.variant === "bonus" ? "#f2b84b" : item.variant === "bomb" ? "#22313f" : "#3f82d7";
+    const badge = item.variant === "bonus" ? "+" : item.variant === "bomb" ? "!" : item.variant === "linked" ? "链" : "冰";
+    const badgeColor =
+      item.variant === "bonus" ? "#f2b84b" : item.variant === "bomb" ? "#22313f" : item.variant === "linked" ? "#9c6ade" : "#3f82d7";
     ctx.beginPath();
     ctx.arc(size * 0.31, -size * 0.31, size * 0.17, 0, Math.PI * 2);
     ctx.fillStyle = badgeColor;
@@ -507,7 +527,7 @@ function drawItem(item, x, y, size, alpha = 1) {
     roundRect(-size / 2 + 5, -size / 2 + 5, size - 10, size - 10, 12);
     ctx.fillStyle = "rgba(173, 232, 255, 0.32)";
     ctx.fill();
-    drawText(`${Math.ceil(item.frozenLeft)}`, 0, 0, size * 0.34, "#ffffff", 900);
+    drawText(`${item.frozenMatches}`, 0, 0, size * 0.34, "#ffffff", 900);
   }
 
   ctx.restore();
@@ -590,20 +610,6 @@ function updateOrders(dt) {
   });
 }
 
-function updateTrayItems(dt) {
-  let thawed = false;
-  trayItems.forEach((item) => {
-    if (item.frozenLeft > 0) {
-      item.frozenLeft = Math.max(0, item.frozenLeft - dt);
-      if (item.frozenLeft === 0) thawed = true;
-    }
-  });
-  if (thawed) {
-    toast("冰冻货解冻了");
-    checkMatches();
-  }
-}
-
 function gameLoop(now) {
   if (!lastTick) lastTick = now;
   const dt = Math.min(0.05, (now - lastTick) / 1000);
@@ -612,7 +618,6 @@ function gameLoop(now) {
   if (state === "playing") {
     timeLeft -= dt;
     updateOrders(dt);
-    updateTrayItems(dt);
     if (timeLeft <= 0) {
       timeLeft = 0;
       fail("顾客等太久了");
@@ -680,18 +685,32 @@ function isOrderComplete(order) {
 }
 
 function addToTray(item) {
-  if (trayItems.length >= tray.slots) {
+  const bundle = [item];
+  if (item.linkedUid) {
+    const mate = activeItems().find((entry) => entry.uid === item.linkedUid);
+    if (mate) bundle.push(mate);
+  }
+
+  if (trayItems.length + bundle.length > tray.slots) {
     fail("暂存槽满了");
     return;
   }
 
-  item.cleared = true;
-  const trayItem = { ...item, scale: 1 };
-  if (trayItem.variant === "frozen") {
-    trayItem.frozenLeft = Math.max(2.5, 5 - level * 0.15);
-    toast("冰冻货占住卡槽，稍后解冻");
+  bundle.forEach((entry) => {
+    entry.cleared = true;
+    const trayItem = { ...entry, scale: 1 };
+    if (trayItem.variant === "frozen") {
+      trayItem.frozenMatches = currentConfig.freezeMatches;
+      toast(`冰冻货需要 ${trayItem.frozenMatches} 次消除解冻`);
+    } else if (trayItem.variant === "linked" && bundle.length > 1) {
+      trayItem.linkedUid = null;
+    }
+    trayItems.push(trayItem);
+  });
+
+  if (bundle.length > 1) {
+    toast("捆绑货一起进槽了");
   }
-  trayItems.push(trayItem);
   const matched = checkMatches();
   const lowStockThreshold = Math.max(14, Math.floor(currentConfig.refillTarget * 0.42));
   if (!matched && activeItems().length < lowStockThreshold) {
@@ -708,7 +727,7 @@ function addToTray(item) {
 function checkMatches() {
   const counts = new Map();
   trayItems.forEach((item) => {
-    if (item.frozenLeft > 0) return;
+    if (item.frozenMatches > 0) return;
     counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
   });
 
@@ -717,7 +736,7 @@ function checkMatches() {
       let removed = 0;
       const removedItems = [];
       trayItems = trayItems.filter((item) => {
-        if (item.typeId === typeId && item.frozenLeft <= 0 && removed < 3) {
+        if (item.typeId === typeId && item.frozenMatches <= 0 && removed < 3) {
           removed += 1;
           removedItems.push(item);
           return false;
@@ -725,10 +744,25 @@ function checkMatches() {
         return true;
       });
       resolveShipment(typeId, removedItems);
+      thawFrozenByMatch();
       return true;
     }
   }
   return false;
+}
+
+function thawFrozenByMatch() {
+  let thawed = 0;
+  trayItems.forEach((item) => {
+    if (item.frozenMatches > 0) {
+      item.frozenMatches -= 1;
+      if (item.frozenMatches === 0) thawed += 1;
+    }
+  });
+  if (thawed > 0) {
+    toast(`解冻 ${thawed} 个冰冻货`);
+    setTimeout(() => checkMatches(), 120);
+  }
 }
 
 function resolveShipment(typeId, shippedItems = []) {
@@ -773,8 +807,8 @@ function resolveShipment(typeId, shippedItems = []) {
 
 function clearTrayJunk(count) {
   for (let i = 0; i < count; i += 1) {
-    const junkIndex = trayItems.findIndex((item) => item.frozenLeft <= 0 && !orderForType(item.typeId));
-    const fallbackIndex = trayItems.findIndex((item) => item.frozenLeft <= 0);
+    const junkIndex = trayItems.findIndex((item) => item.frozenMatches <= 0 && !orderForType(item.typeId));
+    const fallbackIndex = trayItems.findIndex((item) => item.frozenMatches <= 0);
     const index = junkIndex >= 0 ? junkIndex : fallbackIndex;
     if (index === -1) return;
     trayItems.splice(index, 1);
@@ -828,11 +862,15 @@ function refillShelf(priorityTypes = [], maxAdd = 6) {
   }
 
   const placements = makeRefillPlacements(pool.length);
+  const addedItems = [];
   shuffle(pool).forEach((typeId, index) => {
     if (placements[index]) {
-      items.push(createItem(typeId, placements[index]));
+      const item = createItem(typeId, placements[index]);
+      addedItems.push(item);
+      items.push(item);
     }
   });
+  applyLinkedPairs([...addedItems, ...selectableItems()]);
 }
 
 function stabilizeBoard() {
