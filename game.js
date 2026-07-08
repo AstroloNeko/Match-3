@@ -28,9 +28,9 @@ const W = canvas.width;
 const H = canvas.height;
 const shelf = { x: 40, y: 226, w: 640, h: 560, rows: 6, cols: 7 };
 const tray = { x: 54, y: 825, w: 612, h: 122, slots: 7 };
-const BASE_TRAY_SLOTS = 7;
-const MAX_TRAY_SLOTS = 9;
-const ORDER_COUNT = 3;
+const BASE_TRAY_SLOTS = 9;
+const MAX_TRAY_SLOTS = 11;
+const ORDER_COUNT = 4;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 const MAX_BOMBS_PER_LEVEL = 3;
 const EMERGENCY_THAW_COOLDOWN = 1.15;
@@ -57,7 +57,7 @@ function levelConfig(levelNumber) {
       frozenItemChance: 0,
       bombItemChance: 0,
       linkedItemChance: 0,
-      freezeMatches: 2
+      freezeMatches: 1
     };
   }
 
@@ -82,7 +82,7 @@ function levelConfig(levelNumber) {
     frozenItemChance: Math.min(0.08 + spike * 0.018, 0.24),
     bombItemChance: Math.min(0.035 + spike * 0.012, 0.14),
     linkedItemChance: Math.min(0.1 + spike * 0.022, 0.3),
-    freezeMatches: Math.min(5, 2 + Math.floor(spike / 4))
+    freezeMatches: 1
   };
 }
 
@@ -482,8 +482,8 @@ function drawBackground() {
 }
 
 function drawOrders() {
-  const cardW = 188;
-  const gap = 14;
+  const gap = 10;
+  const cardW = (W - 84 - gap * (ORDER_COUNT - 1)) / ORDER_COUNT;
   const startX = (W - cardW * ORDER_COUNT - gap * (ORDER_COUNT - 1)) / 2;
 
   orders.forEach((order, index) => {
@@ -502,20 +502,21 @@ function drawOrders() {
 
     if (order.kind === "rush") {
       const ratio = Math.max(0, order.patience / order.maxPatience);
-      roundRect(x + 104, y + 14, 62, 10, 5);
+      roundRect(x + cardW - 72, y + 14, 52, 10, 5);
       ctx.fillStyle = "#f1e8dc";
       ctx.fill();
-      roundRect(x + 104, y + 14, 62 * ratio, 10, 5);
+      roundRect(x + cardW - 72, y + 14, 52 * ratio, 10, 5);
       ctx.fillStyle = ratio < 0.35 ? "#e85d4f" : "#48a868";
       ctx.fill();
     }
 
     order.lines.forEach((line, lineIndex) => {
       const type = itemType(line.typeId);
-      const itemX = x + 42 + lineIndex * 76;
-      const textX = itemX + 42;
-      drawMiniItem(type, itemX, y + 57, 38);
-      drawText(`${line.progress}/${line.needed}`, textX, y + 57, 23, "#22313f", 900);
+      const step = order.lines.length > 1 ? 62 : 0;
+      const itemX = order.lines.length > 1 ? x + 31 + lineIndex * step : x + 42;
+      const textX = itemX + 30;
+      drawMiniItem(type, itemX, y + 57, 32);
+      drawText(`${line.progress}/${line.needed}`, textX, y + 57, 20, "#22313f", 900);
     });
   });
 }
@@ -825,7 +826,8 @@ function drawTray() {
     if (bombDrag && bombDrag.index === index) return;
     if (item.variant === "bomb" && index !== topBombIndex) return;
     const center = trayItemCenter(index);
-    drawItem({ ...item, layer: 0, inTray: true }, center.x, center.y, item.variant === "bomb" ? 46 : 56);
+    const trayItemSize = item.variant === "bomb" ? 46 : Math.min(56, slotW - 14);
+    drawItem({ ...item, layer: 0, inTray: true }, center.x, center.y, trayItemSize);
   });
 
   if (bombDrag) {
