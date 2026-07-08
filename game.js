@@ -863,6 +863,12 @@ function render(now = performance.now()) {
   drawMessages(now);
 }
 
+function queueMatchCheck(delay = 100) {
+  setTimeout(() => {
+    if (state === "playing") checkMatches();
+  }, delay);
+}
+
 function updateOrders(dt) {
   orders.forEach((order) => {
     if (order.kind !== "rush" || state !== "playing") return;
@@ -872,6 +878,7 @@ function updateOrders(dt) {
       toast("急单超时，扣 8 秒");
       replaceOrder(order);
       stabilizeBoard();
+      queueMatchCheck();
     }
   });
 }
@@ -1175,9 +1182,7 @@ function resolveShipment(typeId, shippedItems = []) {
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
       replaceOrder(order);
       timeLeft += (order.kind === "rush" ? 9 : 5) + (lastShipmentHadBonus ? 5 : 0);
-      setTimeout(() => {
-        if (state === "playing") checkMatches();
-      }, 100);
+      queueMatchCheck();
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
     }
