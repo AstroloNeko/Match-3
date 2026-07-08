@@ -340,6 +340,43 @@ function makePlacements(count) {
   return shuffle(placements);
 }
 
+function emptyShelfPlacements() {
+  const occupied = new Set(activeItems().map((item) => `${item.row}:${item.col}:${item.layer}`));
+  const base = [];
+  const upper = [];
+  for (let row = 0; row < shelf.rows; row += 1) {
+    for (let col = 0; col < shelf.cols; col += 1) {
+      const baseKey = `${row}:${col}:0`;
+      const upperKey = `${row}:${col}:1`;
+      if (!occupied.has(baseKey)) {
+        base.push({ row, col, layer: 0 });
+      } else if (!occupied.has(upperKey)) {
+        upper.push({ row, col, layer: 1 });
+      }
+    }
+  }
+  return [...shuffle(base), ...shuffle(upper)];
+}
+
+function returnItemToShelf(item) {
+  if (!item || item.variant === "bomb") return false;
+  const placement = emptyShelfPlacements()[0];
+  if (!placement) return false;
+  const restored = {
+    ...item,
+    row: placement.row,
+    col: placement.col,
+    layer: placement.layer,
+    z: nextUid++,
+    cleared: false,
+    linkedUid: null,
+    frozenMatches: 0,
+    variant: item.frozenMatches > 0 ? "frozen" : item.variant
+  };
+  items.push(restored);
+  return true;
+}
+
 function buildInitialItems() {
   const types = availableTypes();
   const pool = [];
@@ -955,14 +992,17 @@ function useBombOnTray(targetIndex) {
     return;
   }
 
+  const targetItem = trayItems[targetIndex];
   const first = Math.max(bombDrag.index, targetIndex);
   const second = Math.min(bombDrag.index, targetIndex);
   trayItems.splice(first, 1);
   trayItems.splice(second, 1);
-  score += 25;
-  toast("炸弹清掉了目标货物");
+  returnItemToShelf(targetItem);
+  score += 12;
+  toast("炸弹把目标退回货架");
   bombDrag = null;
   checkMatches();
+  stabilizeBoard();
   updateHud();
 }
 
