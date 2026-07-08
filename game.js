@@ -32,6 +32,7 @@ const BASE_TRAY_SLOTS = 7;
 const MAX_TRAY_SLOTS = 9;
 const ORDER_COUNT = 3;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
+const MAX_BOMBS_PER_LEVEL = 3;
 let cellW = shelf.w / shelf.cols;
 let cellH = shelf.h / shelf.rows;
 
@@ -47,7 +48,6 @@ function levelConfig(levelNumber) {
       refillTarget: 18,
       baseTriples: 4,
       obstruction: 0.08,
-      directorStrength: 0.92,
       rushChance: 0,
       bulkChance: 0,
       dualChance: 0,
@@ -73,7 +73,6 @@ function levelConfig(levelNumber) {
     refillTarget: Math.min(Math.floor(capacity * (0.82 + spike * 0.018)), capacity + 16),
     baseTriples: Math.min(14 + spike * 4, 42),
     obstruction: 0.34 + Math.min(spike, 10) * 0.055,
-    directorStrength: Math.max(0.12, 0.5 - spike * 0.045),
     rushChance: Math.min(0.34 + spike * 0.045, 0.68),
     bulkChance: Math.min(0.18 + spike * 0.04, 0.5),
     dualChance: Math.min(0.14 + spike * 0.04, 0.46),
@@ -87,12 +86,12 @@ function levelConfig(levelNumber) {
 }
 
 const itemTypes = [
-  { id: "cup", label: "杯", color: "#e85d4f", icon: "C" },
+  { id: "cup", label: "杯", color: "#d62839", icon: "C" },
   { id: "plant", label: "植", color: "#48a868", icon: "P" },
   { id: "book", label: "书", color: "#3f82d7", icon: "B" },
   { id: "ball", label: "球", color: "#f2b84b", icon: "O" },
   { id: "box", label: "盒", color: "#9c6ade", icon: "X" },
-  { id: "lamp", label: "灯", color: "#f27a3f", icon: "L" },
+  { id: "lamp", label: "灯", color: "#0081a7", icon: "L" },
   { id: "star", label: "星", color: "#18a7a2", icon: "S" },
   { id: "shoe", label: "鞋", color: "#7b8794", icon: "U" },
   { id: "cake", label: "糕", color: "#d96c9f", icon: "K" },
@@ -120,6 +119,8 @@ let message = "";
 let messageUntil = 0;
 let lastShipmentHadBonus = false;
 let bombDrag = null;
+let bombsCreated = 0;
+let hoverItemUid = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
 let confetti = [];
@@ -272,10 +273,12 @@ function createOrder(preferredType) {
 }
 
 function createItem(typeId, placement) {
+  const variant = chooseItemVariant();
+  if (variant === "bomb") bombsCreated += 1;
   return {
     uid: `item-${nextUid++}`,
     typeId,
-    variant: chooseItemVariant(),
+    variant,
     frozenMatches: 0,
     linkedUid: null,
     row: placement.row,
@@ -288,7 +291,7 @@ function createItem(typeId, placement) {
 
 function chooseItemVariant() {
   const roll = Math.random();
-  if (roll < currentConfig.bombItemChance) return "bomb";
+  if (bombsCreated < MAX_BOMBS_PER_LEVEL && roll < currentConfig.bombItemChance) return "bomb";
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance) return "frozen";
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
   return "normal";
@@ -305,19 +308,6 @@ function applyLinkedPairs(candidates) {
     first.linkedUid = second.uid;
     second.linkedUid = first.uid;
   }
-}
-
-function cellKey(row, col) {
-  return `${row}:${col}`;
-}
-
-function occupiedCellLayers() {
-  const layers = new Map();
-  activeItems().forEach((item) => {
-    const key = cellKey(item.row, item.col);
-    layers.set(key, Math.max(layers.get(key) ?? -1, item.layer));
-  });
-  return layers;
 }
 
 function makePlacements(count) {
@@ -342,24 +332,6 @@ function makePlacements(count) {
   return shuffle(placements);
 }
 
-function makeRefillPlacements(count) {
-  const occupied = occupiedCellLayers();
-  const candidates = [];
-
-  for (let row = 0; row < shelf.rows; row += 1) {
-    for (let col = 0; col < shelf.cols; col += 1) {
-      const key = cellKey(row, col);
-      const topLayer = occupied.get(key) ?? -1;
-      if (topLayer < 2) {
-        candidates.push({ row, col, layer: topLayer + 1, weight: topLayer + 1 });
-      }
-    }
-  }
-
-  shuffle(candidates).sort((a, b) => a.weight - b.weight);
-  return candidates.slice(0, count).map(({ row, col, layer }) => ({ row, col, layer }));
-}
-
 function buildInitialItems() {
   const types = availableTypes();
   const pool = [];
@@ -372,7 +344,10 @@ function buildInitialItems() {
     });
   });
 
-  const extraTriples = Math.min(currentConfig.baseTriples, Math.floor((shelf.rows * shelf.cols) / 2));
+  const extraTriples = Math.max(
+    currentConfig.baseTriples,
+    Math.floor((currentConfig.refillTarget - pool.length) / 3)
+  );
   for (let i = 0; i < extraTriples; i += 1) {
     const orderTypes = allOrderTypeIds();
     const typeId = i < 3 ? orderTypes[i % orderTypes.length] : types[i % types.length];
@@ -402,10 +377,12 @@ function startLevel(nextLevel = level, startState = "playing") {
   combo = 0;
   nextUid = 1;
   nextOrderId = 1;
+  bombsCreated = 0;
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
   bombDrag = null;
+  hoverItemUid = null;
   targetOrders = currentConfig.targetOrders;
   timeLeft = currentConfig.timeLimit;
   message = "";
@@ -454,7 +431,7 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
 
   drawText("订单货架", W / 2, 52, 40, "#22313f", 800);
-  drawText(`凑三消出单，货架 ${shelf.rows}x${shelf.cols}，别把暂存槽塞满`, W / 2, 92, 21, "#6b7886", 500);
+  drawText(`订单三消，剩余 ${activeItems().length} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 92, 21, "#6b7886", 500);
   drawOrders();
 }
 
@@ -588,11 +565,12 @@ function itemHitOrder(a, b) {
 function drawBombItem(item, x, y, size, alpha = 1) {
   const blocked = item.inTray ? false : isBlocked(item);
   const pulsing = pulseItems.has(item.uid);
+  const hoverWobble = hoverItemUid === item.uid;
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.scale(pulsing ? 1.08 : 1, pulsing ? 1.08 : 1);
+  ctx.translate(x + (hoverWobble ? Math.sin(performance.now() / 58) * 3 : 0), y);
+  ctx.scale(pulsing || hoverWobble ? 1.08 : 1, pulsing || hoverWobble ? 1.08 : 1);
 
   ctx.shadowColor = "rgba(34, 49, 63, 0.24)";
   ctx.shadowBlur = blocked ? 6 : 18;
@@ -643,12 +621,13 @@ function drawItem(item, x, y, size, alpha = 1) {
   const frozen = item.frozenMatches > 0;
   const pulsing = pulseItems.has(item.uid);
   const shaking = shakeItems.has(item.uid);
-  const shake = shaking ? Math.sin(performance.now() / 36) * 5 : 0;
+  const hoverWobble = hoverItemUid === item.uid && item.variant !== "normal";
+  const shake = shaking || hoverWobble ? Math.sin(performance.now() / (hoverWobble ? 58 : 36)) * (hoverWobble ? 3 : 5) : 0;
 
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(x + shake, y);
-  ctx.scale(pulsing ? 1.1 : 1, pulsing ? 1.1 : 1);
+  ctx.scale(pulsing || hoverWobble ? 1.1 : 1, pulsing || hoverWobble ? 1.1 : 1);
 
   ctx.shadowColor = item.variant === "bonus" && !blocked ? "rgba(242, 184, 75, 0.42)" : "rgba(34, 49, 63, 0.18)";
   ctx.shadowBlur = item.variant === "bonus" && !blocked ? 22 : blocked ? 6 : 14;
@@ -743,6 +722,7 @@ function drawLinkedChains() {
     const b = itemCenter(mate);
     ctx.save();
     ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -performance.now() / 55;
     ctx.lineWidth = 6;
     ctx.strokeStyle = "rgba(156, 106, 222, 0.78)";
     ctx.beginPath();
@@ -767,6 +747,10 @@ function drawLinkedChains() {
 function drawTray() {
   const slotW = tray.w / tray.slots;
   const bombItems = trayItems.filter((item) => item.variant === "bomb");
+  let topBombIndex = -1;
+  trayItems.forEach((item, index) => {
+    if (item.variant === "bomb") topBombIndex = index;
+  });
   roundRect(tray.x, tray.y, tray.w, tray.h, 22);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
@@ -793,6 +777,7 @@ function drawTray() {
 
   trayItems.forEach((item, index) => {
     if (bombDrag && bombDrag.index === index) return;
+    if (item.variant === "bomb" && index !== topBombIndex) return;
     const center = trayItemCenter(index);
     drawItem({ ...item, layer: 0, inTray: true }, center.x, center.y, item.variant === "bomb" ? 46 : 56);
   });
@@ -894,9 +879,8 @@ function trayItemCenter(index) {
   const slotW = tray.w / tray.slots;
   const item = trayItems[index];
   if (item?.variant === "bomb") {
-    const bombIndex = trayItems.slice(0, index).filter((entry) => entry.variant === "bomb").length;
     return {
-      x: tray.x + tray.w - 30 - bombIndex * 52,
+      x: tray.x + tray.w - 44,
       y: tray.y - 26
     };
   }
@@ -1017,11 +1001,7 @@ function addToTray(item) {
   if (bundle.length > 1) {
     toast("捆绑货一起进槽了");
   }
-  const matched = checkMatches();
-  const lowStockThreshold = Math.max(14, Math.floor(currentConfig.refillTarget * 0.42));
-  if (!matched && activeItems().length < lowStockThreshold) {
-    refillShelf([], Math.min(7, 4 + Math.floor(level / 3)));
-  }
+  checkMatches();
   stabilizeBoard();
   updateHud();
 
@@ -1036,8 +1016,13 @@ function checkMatches() {
     counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
   });
 
+  let hasBlockedTriple = false;
   for (const [typeId, count] of counts) {
     if (count >= 3) {
+      if (!orderForType(typeId)) {
+        hasBlockedTriple = true;
+        continue;
+      }
       let removed = 0;
       const removedItems = [];
       trayItems = trayItems.filter((item) => {
@@ -1053,6 +1038,7 @@ function checkMatches() {
       return true;
     }
   }
+  if (hasBlockedTriple) toast("暂时没有这个订单，先卡在槽里");
   return false;
 }
 
@@ -1092,12 +1078,13 @@ function resolveShipment(typeId, shippedItems = []) {
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
       score += 90 + bonus + combo * 15 + (lastShipmentHadBonus ? 45 : 0);
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
-      const newOrder = replaceOrder(order);
-      refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], Math.min(8, 5 + Math.floor(level / 4)));
+      replaceOrder(order);
       timeLeft += (order.kind === "rush" ? 9 : 5) + (lastShipmentHadBonus ? 5 : 0);
+      setTimeout(() => {
+        if (state === "playing") checkMatches();
+      }, 100);
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
-      refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], Math.min(5, 3 + Math.floor(level / 5)));
     }
   } else {
     combo = 0;
@@ -1106,7 +1093,7 @@ function resolveShipment(typeId, shippedItems = []) {
     toast("散货出库，顾客有点急了");
   }
 
-  if (completedOrders >= targetOrders) {
+  if (completedOrders >= targetOrders || !orders.length) {
     win();
   }
 }
@@ -1114,8 +1101,59 @@ function resolveShipment(typeId, shippedItems = []) {
 function replaceOrder(doneOrder) {
   const index = orders.findIndex((order) => order.id === doneOrder.id);
   if (index === -1) return null;
-  orders[index] = createOrder(preferredRefillType());
+  const nextOrder = createOrderFromStock(preferredRefillType());
+  if (!nextOrder) {
+    orders.splice(index, 1);
+    return null;
+  }
+  orders[index] = nextOrder;
   return orders[index];
+}
+
+function remainingStockCounts() {
+  const counts = new Map();
+  [...activeItems(), ...trayItems].forEach((item) => {
+    if (item.variant === "bomb") return;
+    counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
+  });
+  return counts;
+}
+
+function createOrderFromStock(preferredType) {
+  const counts = remainingStockCounts();
+  const current = new Set(allOrderTypeIds());
+  const enoughForNormal = [...counts.entries()]
+    .filter(([typeId, count]) => count >= 3 && !current.has(typeId))
+    .map(([typeId]) => typeId);
+  const fallbackNormal = [...counts.entries()].filter(([, count]) => count >= 3).map(([typeId]) => typeId);
+  const normalOptions = enoughForNormal.length ? enoughForNormal : fallbackNormal;
+  if (!normalOptions.length) return null;
+
+  const preferredUsable = preferredType && normalOptions.includes(preferredType);
+  const primary = preferredUsable ? preferredType : choice(normalOptions);
+  const roll = Math.random();
+  let kind = "normal";
+  if (roll < currentConfig.dualChance) {
+    const secondaryOptions = normalOptions.filter((typeId) => typeId !== primary);
+    if (secondaryOptions.length) kind = "dual";
+  } else if (roll < currentConfig.dualChance + currentConfig.bulkChance && (counts.get(primary) || 0) >= 6) {
+    kind = "bulk";
+  } else if (roll < currentConfig.dualChance + currentConfig.bulkChance + currentConfig.rushChance) {
+    kind = "rush";
+  }
+
+  const lines = [{ typeId: primary, needed: kind === "bulk" ? 6 : 3, progress: 0 }];
+  if (kind === "dual") {
+    lines.push({ typeId: choice(normalOptions.filter((typeId) => typeId !== primary)), needed: 3, progress: 0 });
+  }
+
+  return {
+    id: nextOrderId++,
+    kind,
+    lines,
+    patience: kind === "rush" ? currentConfig.rushPatience : null,
+    maxPatience: kind === "rush" ? currentConfig.rushPatience : null
+  };
 }
 
 function preferredRefillType() {
@@ -1135,58 +1173,11 @@ function preferredRefillType() {
   return selectable.length ? choice(selectable).typeId : choice(availableTypes());
 }
 
-function refillShelf(priorityTypes = [], maxAdd = 6) {
-  const types = availableTypes();
-  const pool = [];
-  const stockGap = Math.max(0, currentConfig.refillTarget - activeItems().length);
-  const needed = Math.min(maxAdd, stockGap || Math.min(3, maxAdd));
-  if (needed <= 0) return;
-
-  priorityTypes.forEach((typeId) => {
-    if (typeId && pool.length < needed) pool.push(typeId);
-  });
-
-  orders.forEach((order) => {
-    order.lines.forEach((line) => {
-      if (pool.length < needed) pool.push(line.typeId);
-    });
-  });
-
-  while (pool.length < needed) {
-    const orderTypes = allOrderTypeIds();
-    const typeId = Math.random() < 0.5 + currentConfig.directorStrength * 0.22 ? choice(orderTypes) : choice(types);
-    pool.push(typeId);
-  }
-
-  const placements = makeRefillPlacements(pool.length);
-  const addedItems = [];
-  shuffle(pool).forEach((typeId, index) => {
-    if (placements[index]) {
-      const item = createItem(typeId, placements[index]);
-      addedItems.push(item);
-      items.push(item);
-    }
-  });
-  applyLinkedPairs([...addedItems, ...selectableItems()]);
-}
-
 function stabilizeBoard() {
   const selectable = selectableItems();
   if (!selectable.length) {
     const top = activeItems().slice().sort(itemHitOrder)[0];
     if (top) top.layer = Math.max(0, top.layer - 1);
-    return;
-  }
-
-  const wanted = wantedType();
-  const shouldIntervene = Math.random() < currentConfig.directorStrength || trayItems.length >= tray.slots - 2;
-  if (wanted && shouldIntervene && !selectable.some((item) => item.typeId === wanted)) {
-    choice(selectable).typeId = wanted;
-  }
-
-  const orderTypes = new Set(allOrderTypeIds());
-  if (!selectableItems().some((item) => orderTypes.has(item.typeId))) {
-    choice(selectableItems()).typeId = choice(allOrderTypeIds());
   }
 }
 
@@ -1327,10 +1318,19 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!bombDrag) return;
   const point = canvasPoint(event);
+  if (!bombDrag && state === "playing") {
+    const trayHit = hitTrayItem(point);
+    const item = trayHit?.item || hitItem(point);
+    hoverItemUid = item?.uid || null;
+  }
+  if (!bombDrag) return;
   bombDrag.x = Math.max(32, Math.min(W - 32, point.x));
   bombDrag.y = Math.max(32, Math.min(H - 32, point.y));
+});
+
+canvas.addEventListener("pointerleave", () => {
+  hoverItemUid = null;
 });
 
 canvas.addEventListener("pointerup", (event) => {
