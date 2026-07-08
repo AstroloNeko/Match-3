@@ -1201,7 +1201,7 @@ function resolveShipment(typeId, shippedItems = []) {
 function replaceOrder(doneOrder) {
   const index = orders.findIndex((order) => order.id === doneOrder.id);
   if (index === -1) return null;
-  const nextOrder = createOrderFromStock(preferredRefillType());
+  const nextOrder = createOrderFromStock(preferredRefillType(), doneOrder.id);
   if (!nextOrder) {
     orders.splice(index, 1);
     return null;
@@ -1219,9 +1219,36 @@ function remainingStockCounts() {
   return counts;
 }
 
-function createOrderFromStock(preferredType) {
+function reservedOrderCounts(excludeOrderId = null) {
+  const reserved = new Map();
+  orders.forEach((order) => {
+    if (order.id === excludeOrderId) return;
+    order.lines.forEach((line) => {
+      const remaining = Math.max(0, line.needed - line.progress);
+      if (remaining > 0) {
+        reserved.set(line.typeId, (reserved.get(line.typeId) || 0) + remaining);
+      }
+    });
+  });
+  return reserved;
+}
+
+function availableStockCounts(excludeOrderId = null) {
   const counts = remainingStockCounts();
-  const current = new Set(allOrderTypeIds());
+  const reserved = reservedOrderCounts(excludeOrderId);
+  reserved.forEach((amount, typeId) => {
+    counts.set(typeId, Math.max(0, (counts.get(typeId) || 0) - amount));
+  });
+  return counts;
+}
+
+function createOrderFromStock(preferredType, excludeOrderId = null) {
+  const counts = availableStockCounts(excludeOrderId);
+  const current = new Set(
+    orders
+      .filter((order) => order.id !== excludeOrderId)
+      .flatMap(orderTypeIds)
+  );
   const enoughForNormal = [...counts.entries()]
     .filter(([typeId, count]) => count >= 3 && !current.has(typeId))
     .map(([typeId]) => typeId);
