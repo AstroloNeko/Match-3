@@ -47,3 +47,7 @@
 
 直接用浏览器打开 `index.html` 即可。
 https://astroloneko.github.io/Match-3/
+
+## 本地排行榜
+
+开始界面会显示历史最高分、最高到达关卡和最近一次成绩。纪录保存在浏览器本地 `localStorage` 中，不需要服务器。

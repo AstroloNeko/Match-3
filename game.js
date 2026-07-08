@@ -19,6 +19,10 @@ const tutorialBtn = document.getElementById("tutorialBtn");
 const tutorialPanel = document.getElementById("tutorialPanel");
 const difficultyOverlay = document.getElementById("difficultyOverlay");
 const difficultyBtn = document.getElementById("difficultyBtn");
+const bestScoreText = document.getElementById("bestScoreText");
+const bestLevelText = document.getElementById("bestLevelText");
+const lastRunText = document.getElementById("lastRunText");
+const modalRecord = document.getElementById("modalRecord");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -27,6 +31,7 @@ const tray = { x: 54, y: 825, w: 612, h: 122, slots: 7 };
 const BASE_TRAY_SLOTS = 7;
 const MAX_TRAY_SLOTS = 9;
 const ORDER_COUNT = 3;
+const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 let cellW = shelf.w / shelf.cols;
 let cellH = shelf.h / shelf.rows;
 
@@ -103,6 +108,7 @@ let orders = [];
 let completedOrders = 0;
 let targetOrders = 8;
 let score = 0;
+let runScore = 0;
 let combo = 0;
 let currentConfig = levelConfig(1);
 let timeLeft = 75;
@@ -137,6 +143,79 @@ function availableTypes() {
 
 function itemType(typeId) {
   return itemTypes.find((item) => item.id === typeId);
+}
+
+function defaultLeaderboard() {
+  return {
+    bestScore: 0,
+    bestLevel: 1,
+    lastScore: 0,
+    lastLevel: 1
+  };
+}
+
+function loadLeaderboard() {
+  try {
+    return { ...defaultLeaderboard(), ...JSON.parse(localStorage.getItem(LEADERBOARD_KEY) || "{}") };
+  } catch (error) {
+    return defaultLeaderboard();
+  }
+}
+
+function saveLeaderboard(data) {
+  try {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(data));
+  } catch (error) {
+    // Local storage can be unavailable in privacy modes; the game should still run.
+  }
+}
+
+function formatScore(value) {
+  return Math.max(0, Math.round(value)).toLocaleString("zh-CN");
+}
+
+function updateLeaderboardPanel() {
+  const board = loadLeaderboard();
+  if (bestScoreText) bestScoreText.textContent = formatScore(board.bestScore);
+  if (bestLevelText) bestLevelText.textContent = board.bestLevel;
+  if (lastRunText) lastRunText.textContent = `${formatScore(board.lastScore)} / ${board.lastLevel}关`;
+}
+
+function recordRunResult(levelReached, totalScore) {
+  const board = loadLeaderboard();
+  const scoreValue = Math.max(0, Math.round(totalScore));
+  const levelValue = Math.max(1, levelReached);
+  const isBestScore = scoreValue > board.bestScore;
+  const isBestLevel = levelValue > board.bestLevel;
+  const nextBoard = {
+    bestScore: Math.max(board.bestScore, scoreValue),
+    bestLevel: Math.max(board.bestLevel, levelValue),
+    lastScore: scoreValue,
+    lastLevel: levelValue
+  };
+  saveLeaderboard(nextBoard);
+  updateLeaderboardPanel();
+  return { board: nextBoard, isBestScore, isBestLevel };
+}
+
+function renderModalRecord(totalScore, levelReached, result) {
+  if (!modalRecord) return;
+  const badge = result.isBestScore || result.isBestLevel ? "新纪录" : "本局";
+  modalRecord.classList.remove("is-hidden");
+  modalRecord.innerHTML = `
+    <div>
+      <p class="label">${badge}</p>
+      <strong>${formatScore(totalScore)}</strong>
+    </div>
+    <div>
+      <p class="label">到达关卡</p>
+      <strong>${levelReached}</strong>
+    </div>
+    <div>
+      <p class="label">历史最佳</p>
+      <strong>${formatScore(result.board.bestScore)}</strong>
+    </div>
+  `;
 }
 
 function activeItems() {
@@ -306,6 +385,9 @@ function buildInitialItems() {
 }
 
 function startLevel(nextLevel = level, startState = "playing") {
+  if (nextLevel === 1) {
+    runScore = 0;
+  }
   level = nextLevel;
   currentConfig = levelConfig(level);
   configureShelf(currentConfig);
@@ -335,6 +417,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   buildInitialItems();
   stabilizeBoard();
   updateHud();
+  updateLeaderboardPanel();
 }
 
 function updateHud() {
@@ -1147,13 +1230,19 @@ function toast(text) {
 
 function win() {
   state = "won";
+  const totalScore = runScore + score;
+  const result = recordRunResult(level, totalScore);
   showModal("通关", "今日订单完成", `完成 ${completedOrders} 单，得分 ${score}。下一关订单更多、遮挡更重。`, "下一关");
+  renderModalRecord(totalScore, level, result);
 }
 
 function fail(reason) {
   if (state !== "playing") return;
   state = "failed";
+  const totalScore = runScore + score;
+  const result = recordRunResult(level, totalScore);
   showModal("失败", reason, "可以重开，也可以模拟一次激励广告增加 1 个卡槽。", "看广告扩槽");
+  renderModalRecord(totalScore, level, result);
 }
 
 function showModal(kicker, title, body, primaryLabel) {
@@ -1162,7 +1251,13 @@ function showModal(kicker, title, body, primaryLabel) {
   modalBody.textContent = body;
   primaryBtn.textContent = primaryLabel;
   secondaryBtn.textContent = "重开";
+  if (modalRecord) modalRecord.classList.add("is-hidden");
   overlay.classList.remove("is-hidden");
+}
+
+function advanceToLevel(nextLevel) {
+  runScore += score;
+  startLevel(nextLevel);
 }
 
 function rewardSlot() {
@@ -1265,7 +1360,7 @@ primaryBtn.addEventListener("click", () => {
       overlay.classList.add("is-hidden");
       difficultyOverlay.classList.remove("is-hidden");
     } else {
-      startLevel(level + 1);
+      advanceToLevel(level + 1);
     }
   } else {
     rewardSlot();
@@ -1273,7 +1368,7 @@ primaryBtn.addEventListener("click", () => {
 });
 
 secondaryBtn.addEventListener("click", () => startLevel(level));
-difficultyBtn.addEventListener("click", () => startLevel(2));
+difficultyBtn.addEventListener("click", () => advanceToLevel(2));
 
 startLevel(1, "menu");
 requestAnimationFrame(gameLoop);

@@ -179,6 +179,38 @@ button:active {
   line-height: 1.55;
 }
 
+.leaderboard,
+.recordPanel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.leaderboard > div,
+.recordPanel > div {
+  min-height: 70px;
+  padding: 10px;
+  border: 1px solid #e2d8c9;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.leaderboard strong,
+.recordPanel strong {
+  display: block;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.recordPanel {
+  margin-bottom: 4px;
+}
+
+.recordPanel.is-hidden {
+  display: none;
+}
+
 .modal p {
   margin-top: 0;
 }
@@ -250,6 +282,11 @@ button:active {
   }
 
   .tutorialGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard,
+  .recordPanel {
     grid-template-columns: 1fr;
   }
 }
