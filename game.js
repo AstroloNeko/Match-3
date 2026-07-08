@@ -33,6 +33,7 @@ const MAX_TRAY_SLOTS = 9;
 const ORDER_COUNT = 3;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 const MAX_BOMBS_PER_LEVEL = 3;
+const EMERGENCY_THAW_COOLDOWN = 1.15;
 let cellW = shelf.w / shelf.cols;
 let cellH = shelf.h / shelf.rows;
 
@@ -120,6 +121,7 @@ let messageUntil = 0;
 let lastShipmentHadBonus = false;
 let bombDrag = null;
 let bombsCreated = 0;
+let emergencyThawTimer = 0;
 let hoverItemUid = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
@@ -378,6 +380,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   nextUid = 1;
   nextOrderId = 1;
   bombsCreated = 0;
+  emergencyThawTimer = 0;
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
@@ -830,6 +833,18 @@ function updateOrders(dt) {
   });
 }
 
+function updateEmergencyThaw(dt) {
+  if (!shouldEmergencyThaw()) {
+    emergencyThawTimer = 0;
+    return;
+  }
+  emergencyThawTimer += dt;
+  if (emergencyThawTimer >= EMERGENCY_THAW_COOLDOWN) {
+    emergencyThawTimer = 0;
+    thawFrozenStep("emergency");
+  }
+}
+
 function gameLoop(now) {
   if (!lastTick) lastTick = now;
   const dt = Math.min(0.05, (now - lastTick) / 1000);
@@ -838,6 +853,7 @@ function gameLoop(now) {
   if (state === "playing") {
     timeLeft -= dt;
     updateOrders(dt);
+    updateEmergencyThaw(dt);
     if (timeLeft <= 0) {
       timeLeft = 0;
       fail("顾客等太久了");
@@ -1042,7 +1058,33 @@ function checkMatches() {
   return false;
 }
 
-function thawFrozenByMatch() {
+function hasFrozenTrayItems() {
+  return trayItems.some((item) => item.frozenMatches > 0);
+}
+
+function availableUnfrozenCounts() {
+  const counts = new Map();
+  [...activeItems(), ...trayItems].forEach((item) => {
+    if (item.variant === "bomb") return;
+    if (item.frozenMatches > 0) return;
+    if (item.variant === "frozen") return;
+    counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
+  });
+  return counts;
+}
+
+function canCompleteAnyCurrentOrderWithoutThaw() {
+  const counts = availableUnfrozenCounts();
+  return orders.some((order) =>
+    order.lines.some((line) => line.progress < line.needed && (counts.get(line.typeId) || 0) >= 3)
+  );
+}
+
+function shouldEmergencyThaw() {
+  return hasFrozenTrayItems() && !canCompleteAnyCurrentOrderWithoutThaw();
+}
+
+function thawFrozenStep(source = "match") {
   let thawed = 0;
   trayItems.forEach((item) => {
     if (item.frozenMatches > 0) {
@@ -1054,12 +1096,19 @@ function thawFrozenByMatch() {
     }
   });
   if (thawed > 0) {
-    const thawTimeBonus = thawed * 3;
-    score += thawed * 35;
+    const thawTimeBonus = thawed * (source === "emergency" ? 1 : 3);
+    score += thawed * (source === "emergency" ? 18 : 35);
     timeLeft += thawTimeBonus;
-    toast(`解冻 ${thawed} 个冰冻货，转成星标 +${thawTimeBonus}s`);
-    setTimeout(() => checkMatches(), 120);
+    toast(source === "emergency" ? `残局融冰 ${thawed} 个 +${thawTimeBonus}s` : `解冻 ${thawed} 个冰冻货，转成星标 +${thawTimeBonus}s`);
+    setTimeout(() => {
+      if (state === "playing") checkMatches();
+    }, 120);
   }
+  return thawed;
+}
+
+function thawFrozenByMatch() {
+  thawFrozenStep("match");
 }
 
 function resolveShipment(typeId, shippedItems = []) {
