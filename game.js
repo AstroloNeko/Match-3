@@ -683,6 +683,7 @@ function drawLinkedChains() {
 
 function drawTray() {
   const slotW = tray.w / tray.slots;
+  const bombItems = trayItems.filter((item) => item.variant === "bomb");
   roundRect(tray.x, tray.y, tray.w, tray.h, 22);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
@@ -700,10 +701,17 @@ function drawTray() {
     ctx.stroke();
   }
 
+  if (bombItems.length) {
+    roundRect(tray.x + tray.w - 184, tray.y - 46, 170, 40, 18);
+    ctx.fillStyle = "rgba(34, 49, 63, 0.82)";
+    ctx.fill();
+    drawText(`炸弹 x${bombItems.length}`, tray.x + tray.w - 100, tray.y - 26, 18, "#ffd35a", 900);
+  }
+
   trayItems.forEach((item, index) => {
     if (bombDrag && bombDrag.index === index) return;
-    const x = tray.x + index * slotW + slotW / 2;
-    drawItem({ ...item, layer: 0, inTray: true }, x, tray.y + tray.h / 2, 56);
+    const center = trayItemCenter(index);
+    drawItem({ ...item, layer: 0, inTray: true }, center.x, center.y, item.variant === "bomb" ? 46 : 56);
   });
 
   if (bombDrag) {
@@ -801,8 +809,18 @@ function hitItem(point) {
 
 function trayItemCenter(index) {
   const slotW = tray.w / tray.slots;
+  const item = trayItems[index];
+  if (item?.variant === "bomb") {
+    const bombIndex = trayItems.slice(0, index).filter((entry) => entry.variant === "bomb").length;
+    return {
+      x: tray.x + tray.w - 30 - bombIndex * 52,
+      y: tray.y - 26
+    };
+  }
+
+  const itemIndex = trayItems.slice(0, index).filter((entry) => entry.variant !== "bomb").length;
   return {
-    x: tray.x + index * slotW + slotW / 2,
+    x: tray.x + itemIndex * slotW + slotW / 2,
     y: tray.y + tray.h / 2
   };
 }
@@ -810,11 +828,36 @@ function trayItemCenter(index) {
 function hitTrayItem(point) {
   for (let index = trayItems.length - 1; index >= 0; index -= 1) {
     const center = trayItemCenter(index);
-    if (Math.abs(point.x - center.x) <= 36 && Math.abs(point.y - center.y) <= 42) {
+    const item = trayItems[index];
+    const halfW = item.variant === "bomb" ? 30 : 36;
+    const halfH = item.variant === "bomb" ? 30 : 42;
+    if (Math.abs(point.x - center.x) <= halfW && Math.abs(point.y - center.y) <= halfH) {
       return { item: trayItems[index], index };
     }
   }
   return null;
+}
+
+function trayUsedSlots() {
+  return trayItems.filter((item) => item.variant !== "bomb").length;
+}
+
+function hasTrayBomb() {
+  return trayItems.some((item) => item.variant === "bomb");
+}
+
+function bundleUsedSlots(bundle) {
+  return bundle.filter((item) => item.variant !== "bomb").length;
+}
+
+function checkTrayCapacity(projectedUsed = trayUsedSlots()) {
+  if (projectedUsed < tray.slots) return false;
+  if (hasTrayBomb()) {
+    toast("暂存槽满了，先拖炸弹清一个");
+    return false;
+  }
+  fail("暂存槽满了");
+  return true;
 }
 
 function useBombOnTray(targetIndex) {
@@ -870,8 +913,9 @@ function addToTray(item) {
     if (mate) bundle.push(mate);
   }
 
-  if (trayItems.length + bundle.length > tray.slots) {
-    fail("暂存槽满了");
+  const projectedUsed = trayUsedSlots() + bundleUsedSlots(bundle);
+  if (projectedUsed > tray.slots) {
+    checkTrayCapacity(projectedUsed);
     return;
   }
 
@@ -898,9 +942,7 @@ function addToTray(item) {
   stabilizeBoard();
   updateHud();
 
-  if (trayItems.length >= tray.slots) {
-    fail("暂存槽满了");
-  }
+  checkTrayCapacity();
 }
 
 function checkMatches() {
