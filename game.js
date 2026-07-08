@@ -38,7 +38,7 @@ function levelConfig(levelNumber) {
       cols: 6,
       typeCount: 3,
       targetOrders: 4,
-      timeLimit: 96,
+      timeLimit: 108,
       refillTarget: 18,
       baseTriples: 4,
       obstruction: 0.08,
@@ -64,7 +64,7 @@ function levelConfig(levelNumber) {
     cols,
     typeCount: Math.min(5 + Math.floor(spike / 2), itemTypes.length),
     targetOrders: 8 + levelNumber * 3 + Math.floor(spike / 2),
-    timeLimit: Math.max(36, 64 - spike * 3),
+    timeLimit: Math.max(48, 78 - spike * 2),
     refillTarget: Math.min(Math.floor(capacity * (0.82 + spike * 0.018)), capacity + 16),
     baseTriples: Math.min(14 + spike * 4, 42),
     obstruction: 0.34 + Math.min(spike, 10) * 0.055,
@@ -72,7 +72,7 @@ function levelConfig(levelNumber) {
     rushChance: Math.min(0.34 + spike * 0.045, 0.68),
     bulkChance: Math.min(0.18 + spike * 0.04, 0.5),
     dualChance: Math.min(0.14 + spike * 0.04, 0.46),
-    rushPatience: Math.max(10, 22 - spike * 1.2),
+    rushPatience: Math.max(13, 26 - spike * 1.1),
     bonusItemChance: Math.min(0.06 + spike * 0.012, 0.18),
     frozenItemChance: Math.min(0.08 + spike * 0.018, 0.24),
     bombItemChance: Math.min(0.035 + spike * 0.012, 0.14),
@@ -985,9 +985,10 @@ function thawFrozenByMatch() {
     }
   });
   if (thawed > 0) {
-    score += thawed * 12;
-    timeLeft += thawed;
-    toast(`解冻 ${thawed} 个冰冻货，转成星标 +${thawed}s`);
+    const thawTimeBonus = thawed * 3;
+    score += thawed * 35;
+    timeLeft += thawTimeBonus;
+    toast(`解冻 ${thawed} 个冰冻货，转成星标 +${thawTimeBonus}s`);
     setTimeout(() => checkMatches(), 120);
   }
 }
@@ -1010,7 +1011,7 @@ function resolveShipment(typeId, shippedItems = []) {
       toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
       const newOrder = replaceOrder(order);
       refillShelf([newOrder?.lines[0].typeId, ...orderTypeIds(newOrder || orders[0])], Math.min(8, 5 + Math.floor(level / 4)));
-      timeLeft += (order.kind === "rush" ? 6 : 3) + (lastShipmentHadBonus ? 3 : 0);
+      timeLeft += (order.kind === "rush" ? 9 : 5) + (lastShipmentHadBonus ? 5 : 0);
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
       refillShelf([typeId, order.lines.find((entry) => entry.progress < entry.needed)?.typeId], Math.min(5, 3 + Math.floor(level / 5)));
@@ -1018,7 +1019,7 @@ function resolveShipment(typeId, shippedItems = []) {
   } else {
     combo = 0;
     score += 25;
-    timeLeft = Math.max(0, timeLeft - Math.min(5, 2 + Math.floor(level / 3)));
+    timeLeft = Math.max(0, timeLeft - Math.min(4, 1 + Math.floor(level / 3)));
     toast("散货出库，顾客有点急了");
   }
 
