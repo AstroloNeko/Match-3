@@ -92,7 +92,7 @@ const itemTypes = [
   { id: "book", label: "书", color: "#3f82d7", icon: "B" },
   { id: "ball", label: "球", color: "#f2b84b", icon: "O" },
   { id: "box", label: "盒", color: "#9c6ade", icon: "X" },
-  { id: "lamp", label: "灯", color: "#0081a7", icon: "L" },
+  { id: "lamp", label: "灯", color: "#c026d3", icon: "L" },
   { id: "star", label: "星", color: "#18a7a2", icon: "S" },
   { id: "shoe", label: "鞋", color: "#7b8794", icon: "U" },
   { id: "cake", label: "糕", color: "#d96c9f", icon: "K" },
@@ -227,6 +227,12 @@ function activeItems() {
 
 function selectableItems() {
   return activeItems().filter((item) => !isBlocked(item));
+}
+
+function remainingItemCount() {
+  const activeGoods = activeItems().filter((item) => item.variant !== "bomb").length;
+  const trayGoods = trayItems.filter((item) => item.variant !== "bomb").length;
+  return activeGoods + trayGoods;
 }
 
 function configureShelf(config) {
@@ -434,7 +440,7 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
 
   drawText("订单货架", W / 2, 52, 40, "#22313f", 800);
-  drawText(`订单三消，剩余 ${activeItems().length} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 92, 21, "#6b7886", 500);
+  drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 92, 21, "#6b7886", 500);
   drawOrders();
 }
 
