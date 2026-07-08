@@ -463,7 +463,7 @@ function itemCenter(item) {
 }
 
 function itemSize(item) {
-  const base = Math.min(62, Math.min(cellW, cellH) * 0.72);
+  const base = Math.min(68, Math.min(cellW, cellH) * 0.78);
   return base + item.layer * 2;
 }
 
@@ -502,7 +502,59 @@ function itemHitOrder(a, b) {
   return itemDrawOrder(b, a);
 }
 
+function drawBombItem(item, x, y, size, alpha = 1) {
+  const blocked = item.inTray ? false : isBlocked(item);
+  const pulsing = pulseItems.has(item.uid);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.scale(pulsing ? 1.08 : 1, pulsing ? 1.08 : 1);
+
+  ctx.shadowColor = "rgba(34, 49, 63, 0.24)";
+  ctx.shadowBlur = blocked ? 6 : 18;
+  ctx.shadowOffsetY = blocked ? 3 : 8;
+  roundRect(-size / 2, -size / 2, size, size, 16);
+  ctx.fillStyle = blocked ? "#9aa4ae" : "#2b3138";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = blocked ? "rgba(255,255,255,0.42)" : "#ffd35a";
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, size * 0.08, size * 0.23, 0, Math.PI * 2);
+  ctx.fillStyle = blocked ? "#6b747d" : "#111820";
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#ffd35a";
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(size * 0.06, -size * 0.13);
+  ctx.quadraticCurveTo(size * 0.2, -size * 0.32, size * 0.36, -size * 0.22);
+  ctx.strokeStyle = "#ffd35a";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  drawText("BOMB", 0, -size * 0.28, size * 0.2, "#ffd35a", 900);
+  drawText("!", 0, size * 0.08, size * 0.34, "#ffffff", 900);
+
+  if (blocked) {
+    drawText("锁", size * 0.28, -size * 0.28, size * 0.22, "#ffffff", 900);
+  }
+
+  ctx.restore();
+}
+
 function drawItem(item, x, y, size, alpha = 1) {
+  if (item.variant === "bomb") {
+    drawBombItem(item, x, y, size, alpha);
+    return;
+  }
+
   const type = itemType(item.typeId);
   const blocked = item.inTray ? false : isBlocked(item);
   const frozen = item.frozenMatches > 0;
@@ -515,8 +567,8 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.translate(x + shake, y);
   ctx.scale(pulsing ? 1.1 : 1, pulsing ? 1.1 : 1);
 
-  ctx.shadowColor = "rgba(34, 49, 63, 0.18)";
-  ctx.shadowBlur = blocked ? 6 : 14;
+  ctx.shadowColor = item.variant === "bonus" && !blocked ? "rgba(242, 184, 75, 0.42)" : "rgba(34, 49, 63, 0.18)";
+  ctx.shadowBlur = item.variant === "bonus" && !blocked ? 22 : blocked ? 6 : 14;
   ctx.shadowOffsetY = blocked ? 3 : 8;
   roundRect(-size / 2, -size / 2, size, size, 16);
   ctx.fillStyle = blocked ? "#aeb7c2" : type.color;
@@ -560,11 +612,22 @@ function drawItem(item, x, y, size, alpha = 1) {
     drawText(badge, size * 0.31, -size * 0.31, size * 0.2, "#ffffff", 900);
   }
 
+  if (!blocked && item.variant === "bonus") {
+    ctx.save();
+    ctx.rotate(-0.18);
+    drawText("STAR", -size * 0.16, -size * 0.34, size * 0.18, "#ffe27a", 900);
+    ctx.restore();
+  }
+
   if (frozen) {
     roundRect(-size / 2 + 5, -size / 2 + 5, size - 10, size - 10, 12);
-    ctx.fillStyle = "rgba(173, 232, 255, 0.32)";
+    ctx.fillStyle = "rgba(135, 217, 255, 0.5)";
     ctx.fill();
-    drawText(`${item.frozenMatches}`, 0, 0, size * 0.34, "#ffffff", 900);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.82)";
+    ctx.stroke();
+    drawText("ICE", 0, -size * 0.08, size * 0.22, "#ffffff", 900);
+    drawText(`${item.frozenMatches}`, 0, size * 0.2, size * 0.26, "#ffffff", 900);
   }
 
   ctx.restore();
@@ -873,11 +936,16 @@ function thawFrozenByMatch() {
   trayItems.forEach((item) => {
     if (item.frozenMatches > 0) {
       item.frozenMatches -= 1;
-      if (item.frozenMatches === 0) thawed += 1;
+      if (item.frozenMatches === 0) {
+        item.variant = "bonus";
+        thawed += 1;
+      }
     }
   });
   if (thawed > 0) {
-    toast(`解冻 ${thawed} 个冰冻货`);
+    score += thawed * 12;
+    timeLeft += thawed;
+    toast(`解冻 ${thawed} 个冰冻货，转成星标 +${thawed}s`);
     setTimeout(() => checkMatches(), 120);
   }
 }
@@ -927,7 +995,10 @@ function replaceOrder(doneOrder) {
 function preferredRefillType() {
   const selectable = selectableItems();
   const trayCounts = new Map();
-  trayItems.forEach((item) => trayCounts.set(item.typeId, (trayCounts.get(item.typeId) || 0) + 1));
+  trayItems.forEach((item) => {
+    if (item.variant === "bomb") return;
+    trayCounts.set(item.typeId, (trayCounts.get(item.typeId) || 0) + 1);
+  });
 
   for (const [typeId, count] of trayCounts) {
     if (count > 0 && selectable.some((item) => item.typeId === typeId)) {
@@ -995,7 +1066,10 @@ function stabilizeBoard() {
 
 function wantedType() {
   const counts = new Map();
-  trayItems.forEach((item) => counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1));
+  trayItems.forEach((item) => {
+    if (item.variant === "bomb") return;
+    counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
+  });
 
   for (const [typeId, count] of counts) {
     if (count === 2) return typeId;
