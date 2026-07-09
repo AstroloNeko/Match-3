@@ -44,7 +44,6 @@ function levelConfig(levelNumber) {
       rows: 5,
       cols: 6,
       typeCount: 3,
-      targetOrders: 4,
       timeLimit: 108,
       refillTarget: 18,
       baseTriples: 4,
@@ -69,7 +68,6 @@ function levelConfig(levelNumber) {
     rows,
     cols,
     typeCount: Math.min(5 + Math.floor(spike / 2), itemTypes.length),
-    targetOrders: 8 + levelNumber * 3 + Math.floor(spike / 2),
     timeLimit: Math.max(48, 78 - spike * 2),
     refillTarget: Math.min(Math.floor(capacity * (0.82 + spike * 0.018)), capacity + 16),
     baseTriples: Math.min(14 + spike * 4, 42),
@@ -106,7 +104,6 @@ let items = [];
 let trayItems = [];
 let orders = [];
 let completedOrders = 0;
-let targetOrders = 8;
 let score = 0;
 let runScore = 0;
 let combo = 0;
@@ -233,6 +230,40 @@ function remainingItemCount() {
   const activeGoods = activeItems().filter((item) => item.variant !== "bomb").length;
   const trayGoods = trayItems.filter((item) => item.variant !== "bomb").length;
   return activeGoods + trayGoods;
+}
+
+function remainingTypeCounts() {
+  const counts = new Map();
+  [...activeItems(), ...trayItems].forEach((item) => {
+    if (item.variant === "bomb") return;
+    counts.set(item.typeId, (counts.get(item.typeId) || 0) + 1);
+  });
+  return counts;
+}
+
+function hasAnyPossibleTriple() {
+  return [...remainingTypeCounts().values()].some((count) => count >= 3);
+}
+
+function cleanupStrayGoods() {
+  if (remainingItemCount() === 0 || hasAnyPossibleTriple()) return false;
+  const cleaned = remainingItemCount();
+  items.forEach((item) => {
+    if (item.variant !== "bomb") item.cleared = true;
+  });
+  trayItems = trayItems.filter((item) => item.variant === "bomb");
+  score += cleaned * 12;
+  toast(`尾货打包清仓 ${cleaned} 件`);
+  return true;
+}
+
+function checkClearWin() {
+  cleanupStrayGoods();
+  if (remainingItemCount() === 0 && state === "playing") {
+    win();
+    return true;
+  }
+  return false;
 }
 
 function configureShelf(config) {
@@ -429,7 +460,6 @@ function startLevel(nextLevel = level, startState = "playing") {
   confetti = [];
   bombDrag = null;
   hoverItemUid = null;
-  targetOrders = currentConfig.targetOrders;
   timeLeft = currentConfig.timeLimit;
   message = "";
   messageUntil = 0;
@@ -445,7 +475,7 @@ function startLevel(nextLevel = level, startState = "playing") {
 
 function updateHud() {
   levelText.textContent = level;
-  itemsText.textContent = `${completedOrders}/${targetOrders}`;
+  itemsText.textContent = remainingItemCount();
   timeText.textContent = Math.ceil(timeLeft);
   reviveBtn.textContent = tray.slots >= MAX_TRAY_SLOTS ? "已满级" : "卡槽+1";
   reviveBtn.disabled = tray.slots >= MAX_TRAY_SLOTS && state === "playing";
@@ -1011,6 +1041,7 @@ function useBombOnTray(targetIndex) {
   toast("炸弹把目标退回货架");
   bombDrag = null;
   checkMatches();
+  checkClearWin();
   stabilizeBoard();
   updateHud();
 }
@@ -1073,10 +1104,11 @@ function addToTray(item) {
     toast("捆绑货一起进槽了");
   }
   checkMatches();
+  checkClearWin();
   stabilizeBoard();
   updateHud();
 
-  checkTrayCapacity();
+  if (state === "playing") checkTrayCapacity();
 }
 
 function checkMatches() {
@@ -1195,9 +1227,7 @@ function resolveShipment(typeId, shippedItems = []) {
     toast("散货出库，顾客有点急了");
   }
 
-  if (completedOrders >= targetOrders || !orders.length) {
-    win();
-  }
+  checkClearWin();
 }
 
 function replaceOrder(doneOrder) {
@@ -1206,6 +1236,7 @@ function replaceOrder(doneOrder) {
   const nextOrder = createOrderFromStock(preferredRefillType(), doneOrder.id);
   if (!nextOrder) {
     orders.splice(index, 1);
+    checkClearWin();
     return null;
   }
   orders[index] = nextOrder;
@@ -1352,7 +1383,7 @@ function win() {
   state = "won";
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
-  showModal("通关", "今日订单完成", `完成 ${completedOrders} 单，得分 ${score}。下一关订单更多、遮挡更重。`, "下一关");
+  showModal("通关", "货柜清空", `完成 ${completedOrders} 单，清空全部货物。下一关货架更大、遮挡更重。`, "下一关");
   renderModalRecord(totalScore, level, result);
 }
 
