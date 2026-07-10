@@ -423,7 +423,7 @@ function returnItemToShelf(item) {
     cleared: false,
     linkedUid: null,
     frozenMatches: 0,
-    variant: item.frozenMatches > 0 ? "frozen" : item.variant
+    variant: item.frozenMatches > 0 ? "frozen" : item.variant === "linked" ? "normal" : item.variant
   };
   items.push(restored);
   return true;
@@ -988,6 +988,8 @@ function drawTray() {
     ctx.stroke();
   }
 
+  drawTrayLinkedChains();
+
   if (bombItems.length) {
     roundRect(tray.x + tray.w - 184, tray.y - 46, 170, 40, 18);
     ctx.fillStyle = "rgba(34, 49, 63, 0.82)";
@@ -1006,6 +1008,47 @@ function drawTray() {
   if (bombDrag) {
     drawItem({ ...bombDrag.item, layer: 0, inTray: true }, bombDrag.x, bombDrag.y, 60, 0.92);
   }
+}
+
+function drawTrayLinkedChains() {
+  const byUid = new Map(trayItems.map((item, index) => [item.uid, { item, index }]));
+  const drawn = new Set();
+  trayItems.forEach((item, index) => {
+    if (item.variant !== "linked" || !item.linkedUid || drawn.has(item.uid)) return;
+    const mateEntry = byUid.get(item.linkedUid);
+    if (!mateEntry || mateEntry.item.variant !== "linked") return;
+    drawn.add(item.uid);
+    drawn.add(mateEntry.item.uid);
+
+    const firstCount = trayItems.filter(
+      (entry) => entry.typeId === item.typeId && entry.variant !== "bomb" && entry.frozenMatches <= 0
+    ).length;
+    const secondCount = trayItems.filter(
+      (entry) => entry.typeId === mateEntry.item.typeId && entry.variant !== "bomb" && entry.frozenMatches <= 0
+    ).length;
+    const armed = item.typeId !== mateEntry.item.typeId
+      && firstCount >= 3
+      && secondCount >= 3
+      && Boolean(orderForType(item.typeId))
+      && Boolean(orderForType(mateEntry.item.typeId));
+    const a = trayItemCenter(index);
+    const b = trayItemCenter(mateEntry.index);
+
+    ctx.save();
+    ctx.setLineDash([8, 7]);
+    ctx.lineDashOffset = -performance.now() / (armed ? 38 : 65);
+    ctx.lineWidth = armed ? 5 : 3;
+    ctx.strokeStyle = armed ? "rgba(242, 184, 75, 0.96)" : "rgba(156, 106, 222, 0.7)";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+
+    if (armed) {
+      drawText("双发", (a.x + b.x) / 2, (a.y + b.y) / 2 - 12, 12, "#9a6500", 900);
+    }
+  });
 }
 
 function drawMessages(now) {
@@ -1318,6 +1361,13 @@ function useBombOnTray(targetIndex) {
   }
 
   const targetItem = trayItems[targetIndex];
+  if (targetItem.linkedUid) {
+    const mate = trayItems.find((item) => item.uid === targetItem.linkedUid);
+    if (mate) {
+      mate.linkedUid = null;
+      if (mate.variant === "linked") mate.variant = "normal";
+    }
+  }
   const first = Math.max(bombDrag.index, targetIndex);
   const second = Math.min(bombDrag.index, targetIndex);
   trayItems.splice(first, 1);
@@ -1385,8 +1435,6 @@ function addToTray(item) {
     if (trayItem.variant === "frozen") {
       trayItem.frozenMatches = currentConfig.freezeMatches;
       toast(`冰冻货需要 ${trayItem.frozenMatches} 次消除解冻`);
-    } else if (trayItem.variant === "linked" && bundle.length > 1) {
-      trayItem.linkedUid = null;
     }
     trayItems.push(trayItem);
   });
@@ -1401,6 +1449,65 @@ function addToTray(item) {
   updateHud();
 
   if (state === "playing") checkTrayCapacity();
+}
+
+function removeTrayTriple(typeId, preferredUid = null) {
+  const eligible = trayItems.filter(
+    (item) => item.typeId === typeId && item.variant !== "bomb" && item.frozenMatches <= 0
+  );
+  if (eligible.length < 3) return [];
+
+  const selected = [];
+  const preferred = preferredUid ? eligible.find((item) => item.uid === preferredUid) : null;
+  if (preferred) selected.push(preferred);
+  eligible.forEach((item) => {
+    if (selected.length < 3 && item.uid !== preferredUid) selected.push(item);
+  });
+  const selectedUids = new Set(selected.map((item) => item.uid));
+  trayItems = trayItems.filter((item) => !selectedUids.has(item.uid));
+  return selected;
+}
+
+function armedLinkedItemForType(typeId) {
+  return trayItems.find((item) => {
+    if (item.typeId !== typeId || item.variant !== "linked" || !item.linkedUid || item.frozenMatches > 0) return false;
+    const mate = trayItems.find((entry) => entry.uid === item.linkedUid && entry.frozenMatches <= 0);
+    if (!mate || mate.typeId === typeId || !orderForType(mate.typeId)) return false;
+    const mateCount = trayItems.filter(
+      (entry) => entry.typeId === mate.typeId && entry.variant !== "bomb" && entry.frozenMatches <= 0
+    ).length;
+    return mateCount >= 3;
+  });
+}
+
+function normalizeDanglingTrayLinks() {
+  const trayUids = new Set(trayItems.map((item) => item.uid));
+  trayItems.forEach((item) => {
+    if (item.variant === "linked" && item.linkedUid && !trayUids.has(item.linkedUid)) {
+      item.variant = "normal";
+      item.linkedUid = null;
+    }
+  });
+}
+
+function triggerLinkedFollowup(shippedItems) {
+  for (const shippedItem of shippedItems) {
+    if (shippedItem.variant !== "linked" || !shippedItem.linkedUid) continue;
+    const mate = trayItems.find(
+      (item) => item.uid === shippedItem.linkedUid && item.variant === "linked" && item.frozenMatches <= 0
+    );
+    if (!mate) continue;
+    const targetOrder = orderForType(mate.typeId);
+    if (!targetOrder) continue;
+    const followupItems = removeTrayTriple(mate.typeId, mate.uid);
+    if (followupItems.length < 3) continue;
+
+    launchDeliveryFlight(mate.typeId, targetOrder.id);
+    thawFrozenByMatch();
+    resolveShipment(mate.typeId, followupItems, targetOrder.id, "chain");
+    return true;
+  }
+  return false;
 }
 
 function checkMatches() {
@@ -1420,16 +1527,8 @@ function checkMatches() {
         hasBlockedTriple = true;
         continue;
       }
-      let removed = 0;
-      const removedItems = [];
-      trayItems = trayItems.filter((item) => {
-        if (item.typeId === typeId && item.variant !== "bomb" && item.frozenMatches <= 0 && removed < 3) {
-          removed += 1;
-          removedItems.push(item);
-          return false;
-        }
-        return true;
-      });
+      const armedLinkedItem = armedLinkedItemForType(typeId);
+      const removedItems = removeTrayTriple(typeId, armedLinkedItem?.uid || null);
       if (matchingOrders.length > 1) {
         pendingShipment = {
           typeId,
@@ -1442,6 +1541,8 @@ function checkMatches() {
         launchDeliveryFlight(typeId, matchingOrders[0].id);
         thawFrozenByMatch();
         resolveShipment(typeId, removedItems, matchingOrders[0].id);
+        triggerLinkedFollowup(removedItems);
+        normalizeDanglingTrayLinks();
       }
       return true;
     }
@@ -1462,6 +1563,8 @@ function dispatchPendingShipment(orderId) {
   pendingShipment = null;
   thawFrozenByMatch();
   resolveShipment(shipment.typeId, shipment.shippedItems, orderId);
+  triggerLinkedFollowup(shipment.shippedItems);
+  normalizeDanglingTrayLinks();
   queueMatchCheck(140);
   updateHud();
   return true;
@@ -1597,7 +1700,7 @@ function applyOrderCompletionReward(order, shipmentRewardText = "") {
   return rewardText;
 }
 
-function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
+function resolveShipment(typeId, shippedItems = [], targetOrderId = null, shipmentSource = "normal") {
   const order = targetOrderId
     ? orders.find((entry) => entry.id === targetOrderId)
     : orderForType(typeId);
@@ -1615,13 +1718,18 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
       score += 90 + bonus + combo * 15 + shipmentRewards.bonusCount * 45 + shipmentRewards.coldCount * 30;
       const rewardText = applyOrderCompletionReward(order, shipmentRewards.text);
-      const completionText = combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label}订单`;
+      const completionText = shipmentSource === "chain"
+        ? `连锁双发·完成${itemType(typeId).label}订单`
+        : combo > 1
+          ? `连单 x${combo}`
+          : `完成 ${itemType(typeId).label}订单`;
       toast(`${completionText} · ${rewardText}`);
       replaceOrder(order);
       queueMatchCheck();
     } else {
       const specialText = shipmentRewards.text ? ` · ${shipmentRewards.text}` : "";
-      toast(`${itemType(typeId).label}已出货，还差一项${specialText}`);
+      const chainText = shipmentSource === "chain" ? "连锁双发·" : "";
+      toast(`${chainText}${itemType(typeId).label}已出货，还差一项${specialText}`);
     }
   } else {
     combo = 0;
