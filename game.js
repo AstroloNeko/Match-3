@@ -120,6 +120,7 @@ let bombDrag = null;
 let bombsCreated = 0;
 let emergencyThawTimer = 0;
 let pendingShipment = null;
+let deliveryFlights = [];
 let hoverItemUid = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
@@ -459,6 +460,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   bombsCreated = 0;
   emergencyThawTimer = 0;
   pendingShipment = null;
+  deliveryFlights = [];
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
@@ -561,10 +563,6 @@ function drawOrders() {
     });
   });
 
-  if (pendingShipment) {
-    const type = itemType(pendingShipment.typeId);
-    drawText(`三件${type.label}已装箱，请选择订单`, W / 2, 218, 17, "#9a6500", 800);
-  }
 }
 
 function orderCardBounds(index) {
@@ -911,13 +909,85 @@ function drawConfetti() {
   });
 }
 
+function drawShipmentCrate(now) {
+  if (!pendingShipment) return;
+  const type = itemType(pendingShipment.typeId);
+  const age = Math.max(0, now - pendingShipment.createdAt);
+  const pop = Math.min(1, age / 170);
+  const eased = 1 - Math.pow(1 - pop, 3);
+  const w = 236;
+  const h = 74;
+  const x = W / 2 - w / 2;
+  const y = 210 + (1 - eased) * 18;
+
+  ctx.save();
+  ctx.globalAlpha = eased;
+  ctx.shadowColor = "rgba(62, 43, 22, 0.28)";
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  roundRect(x, y, w, h, 12);
+  ctx.fillStyle = "#f3c77d";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#a86f2f";
+  ctx.stroke();
+
+  ctx.fillStyle = "#d89a4c";
+  ctx.fillRect(x + w / 2 - 13, y + 2, 26, h - 4);
+  ctx.fillStyle = "rgba(255,255,255,0.34)";
+  ctx.fillRect(x + w / 2 - 5, y + 2, 10, h - 4);
+
+  [-22, 0, 22].forEach((offset) => drawMiniItem(type, x + 48 + offset, y + 38, 30));
+  drawText(`${type.label}货 x3`, x + 142, y + 28, 20, "#4f351d", 900);
+  drawText("点击金色订单发货", x + 142, y + 51, 14, "#76512c", 700);
+  ctx.restore();
+}
+
+function launchDeliveryFlight(typeId, orderId, fromPending = false) {
+  const orderIndex = orders.findIndex((order) => order.id === orderId);
+  if (orderIndex < 0) return;
+  const target = orderCardBounds(orderIndex);
+  deliveryFlights.push({
+    typeId,
+    fromX: W / 2,
+    fromY: fromPending ? 247 : tray.y + 22,
+    toX: target.x + target.w / 2,
+    toY: target.y + target.h / 2,
+    startedAt: performance.now(),
+    duration: 360
+  });
+}
+
+function drawDeliveryFlights(now) {
+  deliveryFlights = deliveryFlights.filter((flight) => {
+    const progress = (now - flight.startedAt) / flight.duration;
+    if (progress >= 1) return false;
+    const t = Math.max(0, progress);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const x = flight.fromX + (flight.toX - flight.fromX) * eased;
+    const baseY = flight.fromY + (flight.toY - flight.fromY) * eased;
+    const y = baseY - Math.sin(Math.PI * eased) * 72;
+    const scale = 1 - eased * 0.35;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (1 - eased) * 1.8);
+    ctx.translate(x, y);
+    ctx.rotate((flight.toX - flight.fromX) * eased * 0.0018);
+    drawMiniItem(itemType(flight.typeId), 0, 0, 42 * scale);
+    ctx.restore();
+    return true;
+  });
+}
+
 function render(now = performance.now()) {
   drawBackground();
   drawShelf();
   drawLinkedChains();
   drawItems();
+  drawShipmentCrate(now);
   drawTray();
   drawConfetti();
+  drawDeliveryFlights(now);
   drawMessages(now);
 }
 
@@ -1183,10 +1253,12 @@ function checkMatches() {
         pendingShipment = {
           typeId,
           shippedItems: removedItems,
-          orderIds: matchingOrders.map((order) => order.id)
+          orderIds: matchingOrders.map((order) => order.id),
+          createdAt: performance.now()
         };
         toast(`三件${itemType(typeId).label}已装箱，点选要交付的订单`);
       } else {
+        launchDeliveryFlight(typeId, matchingOrders[0].id);
         resolveShipment(typeId, removedItems, matchingOrders[0].id);
         thawFrozenByMatch();
       }
@@ -1205,6 +1277,7 @@ function dispatchPendingShipment(orderId) {
   }
 
   const shipment = pendingShipment;
+  launchDeliveryFlight(shipment.typeId, orderId, true);
   pendingShipment = null;
   resolveShipment(shipment.typeId, shipment.shippedItems, orderId);
   thawFrozenByMatch();
