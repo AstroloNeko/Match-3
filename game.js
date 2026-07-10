@@ -23,6 +23,17 @@ const bestScoreText = document.getElementById("bestScoreText");
 const bestLevelText = document.getElementById("bestLevelText");
 const lastRunText = document.getElementById("lastRunText");
 const modalRecord = document.getElementById("modalRecord");
+const seedBtn = document.getElementById("seedBtn");
+const seedText = document.getElementById("seedText");
+const diagnosticsBtn = document.getElementById("diagnosticsBtn");
+const diagnosticCount = document.getElementById("diagnosticCount");
+const diagnosticsOverlay = document.getElementById("diagnosticsOverlay");
+const diagnosticsSeed = document.getElementById("diagnosticsSeed");
+const diagnosticsSummary = document.getElementById("diagnosticsSummary");
+const diagnosticList = document.getElementById("diagnosticList");
+const copyReportBtn = document.getElementById("copyReportBtn");
+const closeDiagnosticsBtn = document.getElementById("closeDiagnosticsBtn");
+const modalDiagnosticsBtn = document.getElementById("modalDiagnosticsBtn");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -128,17 +139,60 @@ let hoverItemUid = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
 let confetti = [];
+let runSeed = "";
+let levelSeed = "";
+let randomState = 1;
+let diagnosticEvents = [];
+let requestedStartLevel = 1;
+let diagnosticsPreviousState = "playing";
+
+function hashSeed(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function generateRunSeed() {
+  try {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0].toString(36).toUpperCase().padStart(7, "0");
+  } catch (error) {
+    return (Date.now() >>> 0).toString(36).toUpperCase().padStart(7, "0");
+  }
+}
+
+function normalizeSeed(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 24);
+  return normalized || generateRunSeed();
+}
+
+function initializeLevelRandom(levelNumber) {
+  levelSeed = `${runSeed}-${levelNumber}`;
+  randomState = hashSeed(levelSeed) || 0x6d2b79f5;
+}
+
+function gameRandom() {
+  randomState += 0x6d2b79f5;
+  let value = randomState;
+  value = Math.imul(value ^ (value >>> 15), value | 1);
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+  return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+}
 
 function shuffle(array) {
   for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(gameRandom() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
 }
 
 function choice(array) {
-  return array[Math.floor(Math.random() * array.length)];
+  return array[Math.floor(gameRandom() * array.length)];
 }
 
 function availableTypes() {
@@ -254,6 +308,7 @@ function hasAnyPossibleTriple() {
 function cleanupStrayGoods() {
   if (clearanceSweep || remainingItemCount() === 0 || hasAnyPossibleTriple()) return false;
   const cleaned = remainingItemCount();
+  recordDiagnostic("tail-cleanup", "尾货无法成组，触发清仓", { cleaned });
   const goods = activeItems()
     .filter((item) => item.variant !== "bomb")
     .map((item, index) => ({ ...itemCenter(item), typeId: item.typeId, delay: index * 24 }));
@@ -307,7 +362,7 @@ function createOrder(preferredType) {
   const current = new Set(allOrderTypeIds());
   const options = types.filter((typeId) => !current.has(typeId));
   const primary = preferredType || choice(options.length ? options : types);
-  const roll = Math.random();
+  const roll = gameRandom();
   let kind = "normal";
   if (roll < currentConfig.dualChance) {
     kind = "dual";
@@ -350,7 +405,7 @@ function createItem(typeId, placement) {
 }
 
 function chooseItemVariant() {
-  const roll = Math.random();
+  const roll = gameRandom();
   if (bombsCreated < MAX_BOMBS_PER_LEVEL && roll < currentConfig.bombItemChance) return "bomb";
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance) return "frozen";
   if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
@@ -461,6 +516,7 @@ function startLevel(nextLevel = level, startState = "playing") {
     runScore = 0;
   }
   level = nextLevel;
+  initializeLevelRandom(level);
   currentConfig = levelConfig(level);
   configureShelf(currentConfig);
   state = startState;
@@ -490,6 +546,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   timeLeft = currentConfig.timeLimit;
   message = "";
   messageUntil = 0;
+  diagnosticEvents = [];
 
   for (let i = 0; i < ORDER_COUNT; i += 1) {
     orders.push(createOrder());
@@ -502,12 +559,126 @@ function startLevel(nextLevel = level, startState = "playing") {
   updateLeaderboardPanel();
 }
 
+function countTypes(source) {
+  const counts = {};
+  source.forEach((item) => {
+    if (item.variant === "bomb") return;
+    counts[item.typeId] = (counts[item.typeId] || 0) + 1;
+  });
+  return counts;
+}
+
+function captureBoardDiagnostic() {
+  return {
+    remaining: remainingItemCount(),
+    tray: `${trayUsedSlots()}/${tray.slots}`,
+    selectable: selectableItems().length,
+    covered: activeItems().filter((item) => isBlocked(item)).length,
+    frozenTray: trayItems.filter((item) => item.frozenMatches > 0).length,
+    shelfTypes: countTypes(activeItems()),
+    trayTypes: countTypes(trayItems),
+    orders: orders.map((order) => ({
+      kind: order.kind,
+      needs: order.lines.map((line) => `${line.typeId}:${Math.max(0, line.needed - line.progress)}`)
+    }))
+  };
+}
+
+function updateDiagnosticBadge() {
+  if (seedText) seedText.textContent = `${runSeed} · L${level}`;
+  if (diagnosticCount) diagnosticCount.textContent = diagnosticEvents.length;
+}
+
+function recordDiagnostic(code, label, details = {}) {
+  const snapshot = captureBoardDiagnostic();
+  const signature = `${code}:${snapshot.remaining}:${snapshot.tray}:${snapshot.selectable}:${snapshot.covered}:${snapshot.frozenTray}:${JSON.stringify(snapshot.orders)}`;
+  if (diagnosticEvents[0]?.signature === signature) return;
+  diagnosticEvents.unshift({
+    code,
+    label,
+    details,
+    signature,
+    elapsed: Math.max(0, Math.round((currentConfig.timeLimit - Math.min(currentConfig.timeLimit, timeLeft)) * 10) / 10),
+    snapshot
+  });
+  diagnosticEvents = diagnosticEvents.slice(0, 12);
+  updateDiagnosticBadge();
+}
+
+function buildReproductionUrl() {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("seed", runSeed);
+  url.searchParams.set("level", String(level));
+  return url.toString();
+}
+
+function buildDiagnosticReport() {
+  return JSON.stringify({
+    version: "seed-diagnostics-v1",
+    seed: runSeed,
+    level,
+    levelSeed,
+    url: buildReproductionUrl(),
+    current: captureBoardDiagnostic(),
+    events: diagnosticEvents.map(({ signature, ...event }) => event)
+  }, null, 2);
+}
+
+function renderDiagnosticsPanel() {
+  const current = captureBoardDiagnostic();
+  diagnosticsSeed.textContent = `${runSeed} · 第 ${level} 关`;
+  diagnosticsSummary.textContent = `剩余 ${current.remaining} 件 · 卡槽 ${current.tray} · 可点 ${current.selectable} · 遮挡 ${current.covered} · 冻结 ${current.frozenTray}`;
+  diagnosticList.replaceChildren();
+  if (!diagnosticEvents.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "尚未触发兜底或异常状态";
+    diagnosticList.appendChild(empty);
+    return;
+  }
+  diagnosticEvents.forEach((event) => {
+    const entry = document.createElement("li");
+    entry.textContent = `${event.elapsed}s · ${event.label} · 剩余${event.snapshot.remaining} · 槽${event.snapshot.tray} · 可点${event.snapshot.selectable}`;
+    diagnosticList.appendChild(entry);
+  });
+}
+
+async function copyDebugText(text, successMessage) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(successMessage);
+  } catch (error) {
+    const fallback = document.createElement("textarea");
+    fallback.value = text;
+    fallback.style.position = "fixed";
+    fallback.style.opacity = "0";
+    document.body.appendChild(fallback);
+    fallback.select();
+    const copied = document.execCommand("copy");
+    fallback.remove();
+    toast(copied ? successMessage : "复制失败，请从诊断面板记录种子");
+  }
+}
+
+function openDiagnostics() {
+  diagnosticsPreviousState = state;
+  if (state === "playing") state = "paused";
+  renderDiagnosticsPanel();
+  diagnosticsOverlay.classList.remove("is-hidden");
+}
+
+function closeDiagnostics() {
+  diagnosticsOverlay.classList.add("is-hidden");
+  if (state === "paused") state = diagnosticsPreviousState === "playing" ? "playing" : diagnosticsPreviousState;
+}
+
 function updateHud() {
   levelText.textContent = level;
   itemsText.textContent = remainingItemCount();
   timeText.textContent = Math.ceil(timeLeft);
   reviveBtn.textContent = tray.slots >= MAX_TRAY_SLOTS ? "已满级" : "卡槽+1";
   reviveBtn.disabled = tray.slots >= MAX_TRAY_SLOTS && state === "playing";
+  updateDiagnosticBadge();
 }
 
 function roundRect(x, y, w, h, r) {
@@ -1240,6 +1411,7 @@ function updateEmergencyThaw(dt) {
   emergencyThawTimer += dt;
   if (emergencyThawTimer >= EMERGENCY_THAW_COOLDOWN) {
     emergencyThawTimer = 0;
+    recordDiagnostic("emergency-thaw", "订单无可用三消，触发残局融冰");
     thawFrozenStep("emergency");
   }
 }
@@ -1548,6 +1720,7 @@ function checkMatches() {
     }
   }
   if (hasBlockedTriple) toast("暂时没有这个订单，先卡在槽里");
+  if (hasBlockedTriple) recordDiagnostic("order-mismatch", "卡槽已有三消，但当前订单不接收");
   return false;
 }
 
@@ -1746,6 +1919,7 @@ function replaceOrder(doneOrder) {
   if (index === -1) return null;
   const nextOrder = queuedOrder || createOrderFromStock(preferredRefillType(), doneOrder.id);
   if (!nextOrder) {
+    recordDiagnostic("order-exhausted", "剩余库存不足以生成新订单");
     orders.splice(index, 1);
     checkClearWin();
     return null;
@@ -1805,7 +1979,7 @@ function createOrderFromStock(preferredType, excludeOrderId = null) {
 
   const preferredUsable = preferredType && normalOptions.includes(preferredType);
   const primary = preferredUsable ? preferredType : choice(normalOptions);
-  const roll = Math.random();
+  const roll = gameRandom();
   let kind = "normal";
   if (roll < currentConfig.dualChance) {
     const secondaryOptions = normalOptions.filter((typeId) => typeId !== primary);
@@ -1851,7 +2025,10 @@ function stabilizeBoard() {
   const selectable = selectableItems();
   if (!selectable.length) {
     const top = activeItems().slice().sort(itemHitOrder)[0];
-    if (top) top.layer = Math.max(0, top.layer - 1);
+    if (top) {
+      recordDiagnostic("forced-uncover", "货架无可点击商品，自动降低遮挡", { item: top.uid });
+      top.layer = Math.max(0, top.layer - 1);
+    }
   }
 }
 
@@ -1903,6 +2080,7 @@ function win() {
 
 function fail(reason) {
   if (state !== "playing") return;
+  recordDiagnostic("failure", `失败：${reason}`);
   state = "failed";
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
@@ -2031,7 +2209,7 @@ hintBtn.addEventListener("click", showHint);
 reviveBtn.addEventListener("click", rewardSlot);
 startBtn.addEventListener("click", () => {
   startOverlay.classList.add("is-hidden");
-  startLevel(1);
+  startLevel(requestedStartLevel);
 });
 tutorialBtn.addEventListener("click", () => {
   tutorialPanel.classList.toggle("is-hidden");
@@ -2053,5 +2231,15 @@ primaryBtn.addEventListener("click", () => {
 secondaryBtn.addEventListener("click", () => startLevel(level));
 difficultyBtn.addEventListener("click", () => advanceToLevel(2));
 
-startLevel(1, "menu");
+seedBtn.addEventListener("click", () => copyDebugText(buildReproductionUrl(), "复现链接已复制"));
+diagnosticsBtn.addEventListener("click", openDiagnostics);
+modalDiagnosticsBtn.addEventListener("click", openDiagnostics);
+closeDiagnosticsBtn.addEventListener("click", closeDiagnostics);
+copyReportBtn.addEventListener("click", () => copyDebugText(buildDiagnosticReport(), "复现信息已复制"));
+
+const startupParams = new URLSearchParams(window.location.search);
+runSeed = normalizeSeed(startupParams.get("seed"));
+requestedStartLevel = Math.max(1, Math.min(99, Number.parseInt(startupParams.get("level") || "1", 10) || 1));
+if (requestedStartLevel > 1) startBtn.textContent = `开始第 ${requestedStartLevel} 关`;
+startLevel(requestedStartLevel, "menu");
 requestAnimationFrame(gameLoop);

@@ -30,6 +30,17 @@
         <button id="hintBtn" type="button">提示</button>
         <button id="reviveBtn" type="button">卡槽+1</button>
       </section>
+
+      <section class="diagnosticsBar" aria-label="关卡复现与诊断">
+        <button id="seedBtn" type="button" title="复制当前关卡复现链接">
+          <span>种子</span>
+          <strong id="seedText">-------</strong>
+        </button>
+        <button id="diagnosticsBtn" type="button">
+          <span>诊断</span>
+          <strong id="diagnosticCount">0</strong>
+        </button>
+      </section>
     </main>
 
     <div id="startOverlay" class="startOverlay" role="dialog" aria-modal="true">
@@ -105,9 +116,23 @@
         <h1 id="modalTitle">通关</h1>
         <p id="modalBody">继续下一关。</p>
         <section id="modalRecord" class="recordPanel" aria-label="本局纪录"></section>
-        <div class="modalActions">
+        <div class="modalActions resultActions">
           <button id="secondaryBtn" type="button">重开</button>
+          <button id="modalDiagnosticsBtn" type="button">诊断</button>
           <button id="primaryBtn" type="button">下一关</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="diagnosticsOverlay" class="overlay is-hidden" role="dialog" aria-modal="true">
+      <div class="modal diagnosticsPanel">
+        <p class="label">关卡诊断</p>
+        <h1 id="diagnosticsSeed">-------</h1>
+        <p id="diagnosticsSummary" class="diagnosticsSummary"></p>
+        <ol id="diagnosticList" class="diagnosticList"></ol>
+        <div class="modalActions">
+          <button id="closeDiagnosticsBtn" type="button">关闭</button>
+          <button id="copyReportBtn" type="button">复制复现信息</button>
         </div>
       </div>
     </div>
