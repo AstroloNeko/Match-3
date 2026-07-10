@@ -103,6 +103,7 @@ let level = 1;
 let items = [];
 let trayItems = [];
 let orders = [];
+let queuedOrder = null;
 let completedOrders = 0;
 let score = 0;
 let runScore = 0;
@@ -452,6 +453,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   trayItems = [];
   tray.slots = BASE_TRAY_SLOTS;
   orders = [];
+  queuedOrder = null;
   completedOrders = 0;
   score = 0;
   combo = 0;
@@ -474,6 +476,7 @@ function startLevel(nextLevel = level, startState = "playing") {
     orders.push(createOrder());
   }
   buildInitialItems();
+  queuedOrder = createOrderFromStock(preferredRefillType());
   stabilizeBoard();
   updateHud();
   updateLeaderboardPanel();
@@ -512,16 +515,57 @@ function drawBackground() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, W, H);
 
-  drawText("订单货架", W / 2, 52, 40, "#22313f", 800);
-  drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 92, 21, "#6b7886", 500);
+  drawText("订单货架", W / 2, 42, 38, "#22313f", 800);
+  drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 76, 19, "#6b7886", 500);
+  drawQueuedOrder();
   drawOrders();
+}
+
+function orderKindLabel(order) {
+  if (order.kind === "rush") return "急单";
+  if (order.kind === "bulk") return "大单";
+  if (order.kind === "dual") return "双品";
+  return "订单";
+}
+
+function drawQueuedOrder() {
+  if (!queuedOrder) return;
+  const w = queuedOrder.lines.length > 1 ? 272 : 222;
+  const h = 28;
+  const x = W / 2 - w / 2;
+  const y = 91;
+  roundRect(x, y, w, h, 8);
+  ctx.fillStyle = "#eef2f5";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#aeb8c2";
+  ctx.stroke();
+
+  drawText("下一单", x + 15, y + h / 2, 13, "#5f6c78", 800, "left");
+  drawText(orderKindLabel(queuedOrder), x + 70, y + h / 2, 13, queuedOrder.kind === "rush" ? "#d94f43" : "#5f6c78", 800, "left");
+  queuedOrder.lines.forEach((line, index) => {
+    const type = itemType(line.typeId);
+    const lineX = x + 124 + index * 72;
+    drawMiniItem(type, lineX, y + h / 2, 21);
+    drawText(`x${line.needed}`, lineX + 17, y + h / 2, 13, "#34414d", 800, "left");
+  });
 }
 
 function drawOrders() {
   orders.forEach((order, index) => {
     const primaryType = itemType(order.lines[0].typeId);
-    const { x, y, w: cardW, h } = orderCardBounds(index);
+    const bounds = orderCardBounds(index);
+    const elapsed = order.enteredAt ? performance.now() - order.enteredAt : 999;
+    const enterProgress = Math.min(1, elapsed / 260);
+    const enterEase = 1 - Math.pow(1 - enterProgress, 3);
+    const queueX = W / 2 - bounds.w / 2;
+    const x = queueX + (bounds.x - queueX) * enterEase;
+    const y = bounds.y - (1 - enterEase) * 24;
+    const cardW = bounds.w;
+    const h = bounds.h;
     const canReceivePending = pendingShipment?.orderIds.includes(order.id);
+    ctx.save();
+    ctx.globalAlpha = 0.35 + enterEase * 0.65;
     roundRect(x, y, cardW, 86, 14);
     ctx.fillStyle = canReceivePending ? "#fff8d8" : "#ffffff";
     ctx.fill();
@@ -561,6 +605,7 @@ function drawOrders() {
       drawMiniItem(type, itemX, y + 57, 32);
       drawText(`${line.progress}/${line.needed}`, textX, y + 57, 20, "#22313f", 900);
     });
+    ctx.restore();
   });
 
 }
@@ -1376,13 +1421,16 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
 function replaceOrder(doneOrder) {
   const index = orders.findIndex((order) => order.id === doneOrder.id);
   if (index === -1) return null;
-  const nextOrder = createOrderFromStock(preferredRefillType(), doneOrder.id);
+  const nextOrder = queuedOrder || createOrderFromStock(preferredRefillType(), doneOrder.id);
   if (!nextOrder) {
     orders.splice(index, 1);
     checkClearWin();
     return null;
   }
+  queuedOrder = null;
+  nextOrder.enteredAt = performance.now();
   orders[index] = nextOrder;
+  queuedOrder = createOrderFromStock(preferredRefillType());
   return orders[index];
 }
 
@@ -1397,7 +1445,7 @@ function remainingStockCounts() {
 
 function reservedOrderCounts(excludeOrderId = null) {
   const reserved = new Map();
-  orders.forEach((order) => {
+  [...orders, queuedOrder].filter(Boolean).forEach((order) => {
     if (order.id === excludeOrderId) return;
     order.lines.forEach((line) => {
       const remaining = Math.max(0, line.needed - line.progress);
