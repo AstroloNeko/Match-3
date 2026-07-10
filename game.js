@@ -116,7 +116,6 @@ let nextUid = 1;
 let nextOrderId = 1;
 let message = "";
 let messageUntil = 0;
-let lastShipmentHadBonus = false;
 let bombDrag = null;
 let bombsCreated = 0;
 let emergencyThawTimer = 0;
@@ -839,8 +838,13 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.translate(x + shake, y);
   ctx.scale(pulsing || hoverWobble ? 1.1 : 1, pulsing || hoverWobble ? 1.1 : 1);
 
-  ctx.shadowColor = item.variant === "bonus" && !blocked ? "rgba(242, 184, 75, 0.42)" : "rgba(34, 49, 63, 0.18)";
-  ctx.shadowBlur = item.variant === "bonus" && !blocked ? 22 : blocked ? 6 : 14;
+  const specialGlow = item.variant === "bonus" || item.variant === "cold";
+  ctx.shadowColor = item.variant === "bonus" && !blocked
+    ? "rgba(242, 184, 75, 0.42)"
+    : item.variant === "cold" && !blocked
+      ? "rgba(70, 181, 200, 0.46)"
+      : "rgba(34, 49, 63, 0.18)";
+  ctx.shadowBlur = specialGlow && !blocked ? 22 : blocked ? 6 : 14;
   ctx.shadowOffsetY = blocked ? 3 : 8;
   roundRect(-size / 2, -size / 2, size, size, 16);
   ctx.fillStyle = blocked ? "#aeb7c2" : type.color;
@@ -852,6 +856,8 @@ function drawItem(item, x, y, size, alpha = 1) {
     ? "rgba(72, 84, 96, 0.44)"
     : item.variant === "bonus"
       ? "#ffe27a"
+      : item.variant === "cold"
+        ? "#8be5f0"
       : item.variant === "bomb"
         ? "#22313f"
         : item.variant === "linked"
@@ -874,9 +880,9 @@ function drawItem(item, x, y, size, alpha = 1) {
   }
 
   if (!blocked && item.variant && item.variant !== "normal") {
-    const badge = item.variant === "bonus" ? "+" : item.variant === "bomb" ? "!" : item.variant === "linked" ? "链" : "冰";
+    const badge = item.variant === "bonus" ? "+" : item.variant === "cold" ? "冷" : item.variant === "bomb" ? "!" : item.variant === "linked" ? "链" : "冰";
     const badgeColor =
-      item.variant === "bonus" ? "#f2b84b" : item.variant === "bomb" ? "#22313f" : item.variant === "linked" ? "#9c6ade" : "#3f82d7";
+      item.variant === "bonus" ? "#f2b84b" : item.variant === "cold" ? "#1599aa" : item.variant === "bomb" ? "#22313f" : item.variant === "linked" ? "#9c6ade" : "#3f82d7";
     ctx.beginPath();
     ctx.arc(size * 0.31, -size * 0.31, size * 0.17, 0, Math.PI * 2);
     ctx.fillStyle = badgeColor;
@@ -889,6 +895,10 @@ function drawItem(item, x, y, size, alpha = 1) {
     ctx.rotate(-0.18);
     drawText("STAR", -size * 0.16, -size * 0.34, size * 0.18, "#ffe27a", 900);
     ctx.restore();
+  }
+
+  if (!blocked && item.variant === "cold") {
+    drawText("COLD", -size * 0.13, -size * 0.34, size * 0.16, "#baf6ff", 900);
   }
 
   if (frozen) {
@@ -1003,7 +1013,8 @@ function drawMessages(now) {
     roundRect(94, 774, 532, 52, 26);
     ctx.fillStyle = "rgba(34, 49, 63, 0.86)";
     ctx.fill();
-    drawText(message, W / 2, 800, 22, "#ffffff", 700);
+    const messageSize = message.length > 28 ? 14 : message.length > 22 ? 16 : message.length > 17 ? 18 : 22;
+    drawText(message, W / 2, 800, messageSize, "#ffffff", 700);
   }
 }
 
@@ -1429,8 +1440,8 @@ function checkMatches() {
         toast(`三件${itemType(typeId).label}已装箱，点选要交付的订单`);
       } else {
         launchDeliveryFlight(typeId, matchingOrders[0].id);
-        resolveShipment(typeId, removedItems, matchingOrders[0].id);
         thawFrozenByMatch();
+        resolveShipment(typeId, removedItems, matchingOrders[0].id);
       }
       return true;
     }
@@ -1449,8 +1460,8 @@ function dispatchPendingShipment(orderId) {
   const shipment = pendingShipment;
   launchDeliveryFlight(shipment.typeId, orderId, true);
   pendingShipment = null;
-  resolveShipment(shipment.typeId, shipment.shippedItems, orderId);
   thawFrozenByMatch();
+  resolveShipment(shipment.typeId, shipment.shippedItems, orderId);
   queueMatchCheck(140);
   updateHud();
   return true;
@@ -1488,16 +1499,16 @@ function thawFrozenStep(source = "match") {
     if (item.frozenMatches > 0) {
       item.frozenMatches -= 1;
       if (item.frozenMatches === 0) {
-        item.variant = "bonus";
+        item.variant = "cold";
         thawed += 1;
       }
     }
   });
   if (thawed > 0) {
-    const thawTimeBonus = thawed * (source === "emergency" ? 1 : 3);
+    const thawTimeBonus = thawed * (source === "emergency" ? 1 : 2);
     score += thawed * (source === "emergency" ? 18 : 35);
     timeLeft += thawTimeBonus;
-    toast(source === "emergency" ? `残局融冰 ${thawed} 个 +${thawTimeBonus}s` : `解冻 ${thawed} 个冰冻货，转成星标 +${thawTimeBonus}s`);
+    toast(source === "emergency" ? `残局融冰 ${thawed} 个 +${thawTimeBonus}s` : `解冻 ${thawed} 个冷链货 +${thawTimeBonus}s`);
     setTimeout(() => {
       if (state === "playing") checkMatches();
     }, 120);
@@ -1523,7 +1534,41 @@ function releaseOneLinkedPair() {
   return true;
 }
 
-function applyOrderCompletionReward(order) {
+function meltOneShelfFrozen() {
+  const frozenItem = activeItems().find((item) => item.variant === "frozen");
+  if (!frozenItem) return false;
+  frozenItem.variant = "cold";
+  frozenItem.frozenMatches = 0;
+  pulseItems.add(frozenItem.uid);
+  setTimeout(() => pulseItems.delete(frozenItem.uid), 1100);
+  return true;
+}
+
+function applyShipmentSpecialRewards(shippedItems) {
+  const bonusCount = shippedItems.filter((item) => item.variant === "bonus").length;
+  const coldCount = shippedItems.filter((item) => item.variant === "cold").length;
+  const rewards = [];
+
+  if (bonusCount > 0) {
+    const bonusTime = bonusCount * 3;
+    timeLeft += bonusTime;
+    rewards.push(bonusCount > 1 ? `星标x${bonusCount}+${bonusTime}秒` : "星标+3秒");
+  }
+
+  if (coldCount > 0) {
+    timeLeft += 3;
+    if (meltOneShelfFrozen()) {
+      rewards.push("冷链+3秒融冰");
+    } else {
+      timeLeft += 2;
+      rewards.push("冷链+5秒");
+    }
+  }
+
+  return { text: rewards.join(" "), bonusCount, coldCount };
+}
+
+function applyOrderCompletionReward(order, shipmentRewardText = "") {
   let rewardText = "";
   if (order.kind === "rush") {
     timeLeft += 10;
@@ -1548,10 +1593,7 @@ function applyOrderCompletionReward(order) {
     rewardText = "普通单 +5秒";
   }
 
-  if (lastShipmentHadBonus) {
-    timeLeft += 5;
-    rewardText += " 星标+5秒";
-  }
+  if (shipmentRewardText) rewardText += ` ${shipmentRewardText}`;
   return rewardText;
 }
 
@@ -1559,7 +1601,7 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
   const order = targetOrderId
     ? orders.find((entry) => entry.id === targetOrderId)
     : orderForType(typeId);
-  lastShipmentHadBonus = shippedItems.some((item) => item.variant === "bonus");
+  const shipmentRewards = applyShipmentSpecialRewards(shippedItems);
   burst(typeId);
 
   if (order) {
@@ -1571,14 +1613,15 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
       combo += 1;
       completedOrders += 1;
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
-      score += 90 + bonus + combo * 15 + (lastShipmentHadBonus ? 45 : 0);
-      const rewardText = applyOrderCompletionReward(order);
+      score += 90 + bonus + combo * 15 + shipmentRewards.bonusCount * 45 + shipmentRewards.coldCount * 30;
+      const rewardText = applyOrderCompletionReward(order, shipmentRewards.text);
       const completionText = combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label}订单`;
       toast(`${completionText} · ${rewardText}`);
       replaceOrder(order);
       queueMatchCheck();
     } else {
-      toast(`${itemType(typeId).label} 已出货，还差一项`);
+      const specialText = shipmentRewards.text ? ` · ${shipmentRewards.text}` : "";
+      toast(`${itemType(typeId).label}已出货，还差一项${specialText}`);
     }
   } else {
     combo = 0;
@@ -1800,7 +1843,7 @@ function showHint() {
   const hinted =
     selectable.filter((item) => item.typeId === target).length
       ? selectable.filter((item) => item.typeId === target)
-      : selectable.filter((item) => item.variant === "bonus" || item.variant === "bomb");
+      : selectable.filter((item) => item.variant === "bonus" || item.variant === "cold" || item.variant === "bomb");
   pulseItems = new Set((hinted.length ? hinted : selectable.slice(0, 2)).map((item) => item.uid));
   toast(target ? `优先拿 ${itemType(target).label}` : "优先拿特殊货或解开遮挡");
   setTimeout(() => {
