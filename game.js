@@ -145,6 +145,7 @@ let randomState = 1;
 let diagnosticEvents = [];
 let requestedStartLevel = 1;
 let diagnosticsPreviousState = "playing";
+let generationReport = null;
 
 function hashSeed(value) {
   let hash = 2166136261;
@@ -387,8 +388,8 @@ function createOrder(preferredType) {
   };
 }
 
-function createItem(typeId, placement) {
-  const variant = chooseItemVariant();
+function createItem(typeId, placement, options = {}) {
+  const variant = options.variant || chooseItemVariant();
   if (variant === "bomb") bombsCreated += 1;
   return {
     uid: `item-${nextUid++}`,
@@ -400,29 +401,59 @@ function createItem(typeId, placement) {
     col: placement.col,
     layer: placement.layer,
     z: nextUid,
-    cleared: false
+    cleared: false,
+    solutionGroup: options.solutionGroup ?? null,
+    protectedFromSpecial: Boolean(options.protectedFromSpecial)
   };
 }
 
 function chooseItemVariant() {
   const roll = gameRandom();
-  if (bombsCreated < MAX_BOMBS_PER_LEVEL && roll < currentConfig.bombItemChance) return "bomb";
-  if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance) return "frozen";
-  if (roll < currentConfig.bombItemChance + currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
+  if (roll < currentConfig.frozenItemChance) return "frozen";
+  if (roll < currentConfig.frozenItemChance + currentConfig.bonusItemChance) return "bonus";
   return "normal";
 }
 
 function applyLinkedPairs(candidates) {
-  const pool = shuffle(candidates.filter((item) => item.variant === "normal" && !item.linkedUid));
+  const pool = shuffle(candidates
+    .filter((item) => item.variant === "normal" && !item.linkedUid && !item.protectedFromSpecial))
+    .sort((a, b) => (a.solutionGroup ?? 999) - (b.solutionGroup ?? 999));
   const pairTarget = Math.floor(pool.length * currentConfig.linkedItemChance);
-  for (let i = 0; i + 1 < pairTarget; i += 2) {
-    const first = pool[i];
-    const second = pool[i + 1];
+  const pairCount = Math.floor(pairTarget / 2);
+  for (let pairIndex = 0; pairIndex < pairCount && pool.length >= 2; pairIndex += 1) {
+    const first = pool.shift();
+    let mateIndex = pool.findIndex((item) =>
+      item.typeId !== first.typeId && Math.abs((item.solutionGroup ?? 0) - (first.solutionGroup ?? 0)) <= 2
+    );
+    if (mateIndex < 0) {
+      mateIndex = pool.findIndex((item) => Math.abs((item.solutionGroup ?? 0) - (first.solutionGroup ?? 0)) <= 2);
+    }
+    if (mateIndex < 0) mateIndex = 0;
+    const [second] = pool.splice(mateIndex, 1);
     first.variant = "linked";
     second.variant = "linked";
     first.linkedUid = second.uid;
     second.linkedUid = first.uid;
   }
+}
+
+function normalizeGeneratedSpecials(candidates) {
+  const byGroup = new Map();
+  candidates.forEach((item) => {
+    if (!byGroup.has(item.solutionGroup)) byGroup.set(item.solutionGroup, []);
+    byGroup.get(item.solutionGroup).push(item);
+  });
+  byGroup.forEach((group) => {
+    let keptFrozen = false;
+    group.forEach((item) => {
+      if (item.variant !== "frozen") return;
+      if (!keptFrozen) {
+        keptFrozen = true;
+      } else {
+        item.variant = "normal";
+      }
+    });
+  });
 }
 
 function makePlacements(count) {
@@ -435,13 +466,15 @@ function makePlacements(count) {
 
   const middle = cells.filter((cell) => cell.row > 0 && cell.row < shelf.rows - 1 && cell.col > 0 && cell.col < shelf.cols - 1);
   const base = shuffle(cells).slice(0, Math.min(count, cells.length));
-  const extra = shuffle([...middle, ...middle]).slice(0, Math.max(0, count - base.length));
+  const extra = shuffle([...middle, ...middle].map((cell) => ({ ...cell }))).slice(0, Math.max(0, count - base.length));
   const placements = [...base, ...extra];
 
   const lifted = shuffle(placements.filter((cell) => cell.row > 0 && cell.row < shelf.rows - 1 && cell.col > 0 && cell.col < shelf.cols - 1));
-  const liftCount = Math.min(lifted.length, Math.floor(count * currentConfig.obstruction));
+  const rawLiftCount = Math.min(lifted.length, Math.floor(count * currentConfig.obstruction));
+  const liftCount = Math.floor(rawLiftCount / 3) * 3;
+  const layerTwoCount = count > shelf.rows * shelf.cols * 0.72 ? Math.floor((liftCount * 0.25) / 3) * 3 : 0;
   lifted.slice(0, liftCount).forEach((cell, index) => {
-    cell.layer = count > shelf.rows * shelf.cols * 0.72 && index % 4 === 0 ? 2 : 1;
+    cell.layer = index < layerTwoCount ? 2 : 1;
   });
 
   return shuffle(placements);
@@ -484,15 +517,278 @@ function returnItemToShelf(item) {
   return true;
 }
 
+function buildTripleTypePlan(pool) {
+  const groupCounts = new Map();
+  pool.forEach((typeId) => groupCounts.set(typeId, (groupCounts.get(typeId) || 0) + 1));
+  groupCounts.forEach((count, typeId) => groupCounts.set(typeId, Math.floor(count / 3)));
+
+  const priorityGroups = [];
+  orders.forEach((order) => {
+    order.lines.forEach((line) => {
+      const requestedGroups = Math.floor(line.needed / 3);
+      for (let index = 0; index < requestedGroups && (groupCounts.get(line.typeId) || 0) > 0; index += 1) {
+        priorityGroups.push(line.typeId);
+        groupCounts.set(line.typeId, groupCounts.get(line.typeId) - 1);
+      }
+    });
+  });
+
+  const remainingGroups = [];
+  groupCounts.forEach((count, typeId) => {
+    for (let index = 0; index < count; index += 1) remainingGroups.push(typeId);
+  });
+  const orderedGroups = [...shuffle(priorityGroups), ...shuffle(remainingGroups)];
+  return {
+    orderedGroups,
+    typeIds: orderedGroups.flatMap((typeId) => [typeId, typeId, typeId]),
+    protectedGroupCount: priorityGroups.length
+  };
+}
+
+function makeBombPlacements(goods, bombCount) {
+  if (!bombCount) return [];
+  const maxLayerByCell = new Map();
+  goods.forEach((item) => {
+    const key = `${item.row}:${item.col}`;
+    maxLayerByCell.set(key, Math.max(maxLayerByCell.get(key) ?? -1, item.layer));
+  });
+  const candidates = [];
+  for (let row = 0; row < shelf.rows; row += 1) {
+    for (let col = 0; col < shelf.cols; col += 1) {
+      const key = `${row}:${col}`;
+      const layer = (maxLayerByCell.get(key) ?? -1) + 1;
+      if (layer <= 3) candidates.push({ row, col, layer });
+    }
+  }
+  const middle = candidates.filter((placement) =>
+    placement.row > 0 && placement.row < shelf.rows - 1 && placement.col > 0 && placement.col < shelf.cols - 1
+  );
+  const preferred = middle.length >= bombCount ? middle : candidates;
+  return shuffle(preferred).slice(0, bombCount);
+}
+
+function candidateItemBlocked(candidate, active) {
+  return active.some((other) => {
+    if (other.uid === candidate.uid || other.layer <= candidate.layer) return false;
+    return Math.abs(other.row - candidate.row) <= 1 && Math.abs(other.col - candidate.col) <= 1;
+  });
+}
+
+function validateGeneratedBoard(candidateItems) {
+  const active = candidateItems.map((item) => ({ ...item }));
+  let simulatedTray = [];
+  const certificate = [];
+  const initialOrderNeeds = new Map();
+  orders.forEach((order) => order.lines.forEach((line) => {
+    initialOrderNeeds.set(line.typeId, (initialOrderNeeds.get(line.typeId) || 0) + line.needed);
+  }));
+  let guard = active.length * 8 + 80;
+
+  function unclearedItems() {
+    return active.filter((item) => !item.cleared);
+  }
+
+  function remainingTypeTotals() {
+    const totals = new Map();
+    [...unclearedItems(), ...simulatedTray].forEach((item) => {
+      if (item.variant === "bomb") return;
+      totals.set(item.typeId, (totals.get(item.typeId) || 0) + 1);
+    });
+    return totals;
+  }
+
+  function outstandingOrderNeed() {
+    return [...initialOrderNeeds.values()].some((amount) => amount > 0);
+  }
+
+  function findShippableTriple() {
+    const byType = new Map();
+    simulatedTray.forEach((item) => {
+      if (item.variant === "bomb" || item.frozenMatches > 0) return;
+      if (!byType.has(item.typeId)) byType.set(item.typeId, []);
+      byType.get(item.typeId).push(item);
+    });
+    return [...byType.entries()].find(([typeId, group]) =>
+      group.length >= 3 && (!outstandingOrderNeed() || (initialOrderNeeds.get(typeId) || 0) > 0)
+    );
+  }
+
+  while (guard > 0) {
+    guard -= 1;
+    const currentActive = unclearedItems();
+    const selectable = currentActive.filter((item) => !candidateItemBlocked(item, currentActive));
+    selectable.filter((item) => item.variant === "bomb").forEach((item) => {
+      item.cleared = true;
+      certificate.push({ action: "collect-bomb", uid: item.uid });
+    });
+
+    const triple = findShippableTriple();
+    if (triple) {
+      const [typeId, group] = triple;
+      const shippedUids = new Set(group.slice(0, 3).map((item) => item.uid));
+      simulatedTray = simulatedTray.filter((item) => !shippedUids.has(item.uid));
+      simulatedTray.forEach((item) => {
+        if (item.frozenMatches > 0) {
+          item.frozenMatches -= 1;
+          if (item.frozenMatches === 0) item.variant = "cold";
+        }
+      });
+      if ((initialOrderNeeds.get(typeId) || 0) > 0) {
+        initialOrderNeeds.set(typeId, Math.max(0, initialOrderNeeds.get(typeId) - 3));
+      }
+      certificate.push({ action: "ship-triple", typeId, trayAfter: simulatedTray.length });
+      continue;
+    }
+
+    const totals = remainingTypeTotals();
+    const anyTripleRemaining = [...totals.values()].some((count) => count >= 3);
+    if (!anyTripleRemaining && !outstandingOrderNeed()) {
+      return { valid: true, reason: "tail-cleanup", certificate, remaining: [...totals.values()].reduce((sum, count) => sum + count, 0) };
+    }
+    if (!unclearedItems().some((item) => item.variant !== "bomb") && !simulatedTray.length) {
+      return { valid: true, reason: "cleared", certificate, remaining: 0 };
+    }
+
+    const allowedTypes = outstandingOrderNeed()
+      ? new Set([...initialOrderNeeds.entries()].filter(([, amount]) => amount > 0).map(([typeId]) => typeId))
+      : new Set([...totals.entries()].filter(([, count]) => count >= 3).map(([typeId]) => typeId));
+    const selectableGoods = selectable
+      .filter((item) => item.variant !== "bomb" && !item.cleared)
+      .sort((a, b) => (a.solutionGroup ?? 999) - (b.solutionGroup ?? 999));
+    const nextItem = selectableGoods.find((item) => allowedTypes.has(item.typeId));
+
+    if (!nextItem) {
+      const frozenTrayItems = simulatedTray.filter((item) => item.frozenMatches > 0);
+      if (frozenTrayItems.length) {
+        frozenTrayItems.forEach((item) => {
+          item.frozenMatches = 0;
+          item.variant = "cold";
+        });
+        certificate.push({ action: "emergency-thaw", count: frozenTrayItems.length });
+        continue;
+      }
+      return {
+        valid: false,
+        reason: outstandingOrderNeed() ? "initial-order-path-blocked" : "no-selectable-order-path",
+        certificate,
+        remaining: [...totals.values()].reduce((sum, count) => sum + count, 0),
+        selectable: selectableGoods.length,
+        tray: simulatedTray.length,
+        trayUids: simulatedTray.map((item) => item.uid)
+      };
+    }
+
+    const bundle = [nextItem];
+    if (nextItem.linkedUid) {
+      const mate = active.find((item) => !item.cleared && item.uid === nextItem.linkedUid);
+      if (mate) bundle.push(mate);
+    }
+    if (simulatedTray.length + bundle.length > BASE_TRAY_SLOTS) {
+      return {
+        valid: false,
+        reason: "tray-overflow",
+        certificate,
+        remaining: [...totals.values()].reduce((sum, count) => sum + count, 0),
+        tray: simulatedTray.length,
+        bundle: bundle.length,
+        trayUids: simulatedTray.map((item) => item.uid)
+      };
+    }
+    bundle.forEach((item) => {
+      item.cleared = true;
+      simulatedTray.push({
+        ...item,
+        frozenMatches: item.variant === "frozen" ? currentConfig.freezeMatches : 0
+      });
+    });
+    certificate.push({ action: "pick", uids: bundle.map((item) => item.uid), trayAfter: simulatedTray.length });
+
+    if (simulatedTray.length >= BASE_TRAY_SLOTS && !findShippableTriple()) {
+      return {
+        valid: false,
+        reason: "tray-full-no-match",
+        certificate,
+        remaining: [...remainingTypeTotals().values()].reduce((sum, count) => sum + count, 0),
+        tray: simulatedTray.length,
+        trayUids: simulatedTray.map((item) => item.uid)
+      };
+    }
+  }
+
+  return {
+    valid: false,
+    reason: "simulation-guard",
+    certificate,
+    remaining: unclearedItems().length,
+    tray: simulatedTray.length,
+    trayUids: simulatedTray.map((item) => item.uid)
+  };
+}
+
+function repairGeneratedCandidate(candidateItems, initialValidation) {
+  let validation = initialValidation;
+  let removedLinkPairs = 0;
+  let removedFrozen = 0;
+
+  for (let repair = 0; repair < candidateItems.length && !validation.valid; repair += 1) {
+    const trayUids = new Set(validation.trayUids || []);
+    const linkedItem = candidateItems.find((item) =>
+      item.variant === "linked" && item.linkedUid && (trayUids.has(item.uid) || trayUids.has(item.linkedUid))
+    );
+    if (linkedItem) {
+      const mate = candidateItems.find((item) => item.uid === linkedItem.linkedUid);
+      linkedItem.variant = "normal";
+      linkedItem.linkedUid = null;
+      if (mate) {
+        mate.variant = "normal";
+        mate.linkedUid = null;
+      }
+      removedLinkPairs += 1;
+      validation = validateGeneratedBoard(candidateItems);
+      continue;
+    }
+
+    const frozenItem = candidateItems.find((item) => item.variant === "frozen" && trayUids.has(item.uid));
+    if (frozenItem) {
+      frozenItem.variant = "normal";
+      removedFrozen += 1;
+      validation = validateGeneratedBoard(candidateItems);
+      continue;
+    }
+
+    const fallbackLinked = candidateItems.find((item) => item.variant === "linked" && item.linkedUid);
+    if (fallbackLinked) {
+      const mate = candidateItems.find((item) => item.uid === fallbackLinked.linkedUid);
+      fallbackLinked.variant = "normal";
+      fallbackLinked.linkedUid = null;
+      if (mate) {
+        mate.variant = "normal";
+        mate.linkedUid = null;
+      }
+      removedLinkPairs += 1;
+      validation = validateGeneratedBoard(candidateItems);
+      continue;
+    }
+    const fallbackFrozen = candidateItems.find((item) => item.variant === "frozen");
+    if (fallbackFrozen) {
+      fallbackFrozen.variant = "normal";
+      removedFrozen += 1;
+      validation = validateGeneratedBoard(candidateItems);
+      continue;
+    }
+    break;
+  }
+
+  return { validation, removedLinkPairs, removedFrozen };
+}
+
 function buildInitialItems() {
   const types = availableTypes();
   const pool = [];
 
   orders.forEach((order) => {
     order.lines.forEach((line) => {
-      for (let i = 0; i < line.needed; i += 1) {
-        pool.push(line.typeId);
-      }
+      for (let i = 0; i < line.needed; i += 1) pool.push(line.typeId);
     });
   });
 
@@ -506,9 +802,46 @@ function buildInitialItems() {
     pool.push(typeId, typeId, typeId);
   }
 
-  const placements = makePlacements(pool.length);
-  items = shuffle(pool).map((typeId, index) => createItem(typeId, placements[index]));
-  applyLinkedPairs(items);
+  const plan = buildTripleTypePlan(pool);
+  const bombCount = currentConfig.bombItemChance > 0
+    ? Math.min(MAX_BOMBS_PER_LEVEL, Math.floor(plan.typeIds.length * currentConfig.bombItemChance))
+    : 0;
+  let candidateItems = [];
+  let validation = null;
+  let repairSummary = { removedLinkPairs: 0, removedFrozen: 0 };
+  let attempts = 0;
+  for (attempts = 1; attempts <= 12; attempts += 1) {
+    nextUid = 1;
+    bombsCreated = 0;
+    const placements = shuffle(makePlacements(plan.typeIds.length)).sort((a, b) => b.layer - a.layer);
+    const goods = plan.typeIds.map((typeId, index) => createItem(typeId, placements[index], {
+      solutionGroup: Math.floor(index / 3),
+      protectedFromSpecial: index < plan.protectedGroupCount * 3,
+      variant: index < plan.protectedGroupCount * 3 ? "normal" : undefined
+    }));
+    normalizeGeneratedSpecials(goods);
+    applyLinkedPairs(goods);
+    const bombPlacements = makeBombPlacements(goods, bombCount);
+    const bombs = bombPlacements.map((placement) => createItem(choice(types), placement, { variant: "bomb" }));
+    candidateItems = [...goods, ...bombs];
+    validation = validateGeneratedBoard(candidateItems);
+    repairSummary = repairGeneratedCandidate(candidateItems, validation);
+    validation = repairSummary.validation;
+    if (validation.valid) break;
+  }
+  items = candidateItems;
+  generationReport = {
+    ...validation,
+    groups: plan.orderedGroups.length,
+    protectedGroups: plan.protectedGroupCount,
+    bombs: bombCount,
+    attempts: Math.min(attempts, 12),
+    removedLinkPairs: repairSummary.removedLinkPairs,
+    removedFrozen: repairSummary.removedFrozen
+  };
+  if (!generationReport.valid) {
+    recordDiagnostic("generator-fallback", "生成器未找到完整结构路径", { reason: generationReport.reason });
+  }
 }
 
 function startLevel(nextLevel = level, startState = "playing") {
@@ -547,6 +880,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   message = "";
   messageUntil = 0;
   diagnosticEvents = [];
+  generationReport = null;
 
   for (let i = 0; i < ORDER_COUNT; i += 1) {
     orders.push(createOrder());
@@ -575,6 +909,16 @@ function captureBoardDiagnostic() {
     selectable: selectableItems().length,
     covered: activeItems().filter((item) => isBlocked(item)).length,
     frozenTray: trayItems.filter((item) => item.frozenMatches > 0).length,
+    generation: generationReport ? {
+      valid: generationReport.valid,
+      reason: generationReport.reason,
+      groups: generationReport.groups,
+      steps: generationReport.certificate.length,
+      bombs: generationReport.bombs,
+      attempts: generationReport.attempts,
+      removedLinkPairs: generationReport.removedLinkPairs,
+      removedFrozen: generationReport.removedFrozen
+    } : null,
     shelfTypes: countTypes(activeItems()),
     trayTypes: countTypes(trayItems),
     orders: orders.map((order) => ({
@@ -620,6 +964,7 @@ function buildDiagnosticReport() {
     level,
     levelSeed,
     url: buildReproductionUrl(),
+    generation: generationReport,
     current: captureBoardDiagnostic(),
     events: diagnosticEvents.map(({ signature, ...event }) => event)
   }, null, 2);
@@ -628,7 +973,10 @@ function buildDiagnosticReport() {
 function renderDiagnosticsPanel() {
   const current = captureBoardDiagnostic();
   diagnosticsSeed.textContent = `${runSeed} · 第 ${level} 关`;
-  diagnosticsSummary.textContent = `剩余 ${current.remaining} 件 · 卡槽 ${current.tray} · 可点 ${current.selectable} · 遮挡 ${current.covered} · 冻结 ${current.frozenTray}`;
+  const generationText = current.generation
+    ? ` · 路径${current.generation.valid ? "通过" : "失败"} ${current.generation.groups}组/${current.generation.steps}步 · 尝试${current.generation.attempts} · 修复链${current.generation.removedLinkPairs}/冰${current.generation.removedFrozen}`
+    : "";
+  diagnosticsSummary.textContent = `剩余 ${current.remaining} 件 · 卡槽 ${current.tray} · 可点 ${current.selectable} · 遮挡 ${current.covered} · 冻结 ${current.frozenTray}${generationText}`;
   diagnosticList.replaceChildren();
   if (!diagnosticEvents.length) {
     const empty = document.createElement("li");
@@ -2017,6 +2365,14 @@ function preferredRefillType() {
       return typeId;
     }
   }
+
+  const activeOrderTypes = new Set(allOrderTypeIds());
+  const availableStock = availableStockCounts();
+  const certifiedType = generationReport?.certificate
+    .filter((step) => step.action === "ship-triple")
+    .map((step) => step.typeId)
+    .find((typeId) => !activeOrderTypes.has(typeId) && (availableStock.get(typeId) || 0) >= 3);
+  if (certifiedType) return certifiedType;
 
   return selectable.length ? choice(selectable).typeId : choice(availableTypes());
 }

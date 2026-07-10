@@ -18,7 +18,20 @@ globalThis.__testApi = {
     }))
   }),
   report: () => JSON.parse(buildDiagnosticReport()),
-  recordDiagnostic
+  recordDiagnostic,
+  generate: (seed, nextLevel) => {
+    runSeed = seed;
+    startLevel(nextLevel, "menu");
+    const goodsByType = {};
+    items.filter((item) => item.variant !== "bomb").forEach((item) => {
+      goodsByType[item.typeId] = (goodsByType[item.typeId] || 0) + 1;
+    });
+    return {
+      report: JSON.parse(JSON.stringify(generationReport)),
+      goodsByType,
+      bombCount: items.filter((item) => item.variant === "bomb").length
+    };
+  }
 };
 `;
 
@@ -124,5 +137,26 @@ assert.equal(report.seed, "FIXED-SEED");
 assert.equal(report.level, 4);
 assert.equal(report.events[0].code, "test-event");
 assert.match(report.url, /seed=FIXED-SEED/);
+assert.equal(report.generation.valid, true);
 
-console.log("seed smoke test passed");
+let maxAttempts = 0;
+let repairedLinkPairs = 0;
+let repairedFrozenItems = 0;
+for (let index = 0; index < 120; index += 1) {
+  const generated = first.generate(`BATCH-${index}`, 2 + (index % 11));
+  assert.equal(
+    generated.report.valid,
+    true,
+    `generated board ${index} must have a playable path (${generated.report.reason}, attempts=${generated.report.attempts}, tray=${generated.report.tray ?? 0})`
+  );
+  assert.ok(generated.report.attempts >= 1 && generated.report.attempts <= 12, `generated board ${index} must respect retry bounds`);
+  maxAttempts = Math.max(maxAttempts, generated.report.attempts);
+  repairedLinkPairs += generated.report.removedLinkPairs;
+  repairedFrozenItems += generated.report.removedFrozen;
+  Object.values(generated.goodsByType).forEach((count) => {
+    assert.equal(count % 3, 0, `generated board ${index} must preserve triple inventory`);
+  });
+  assert.ok(generated.bombCount <= 3, `generated board ${index} must respect the bomb cap`);
+}
+
+console.log(`seed smoke test passed (120 boards, max attempts ${maxAttempts}, removed link pairs ${repairedLinkPairs}, removed frozen ${repairedFrozenItems})`);
