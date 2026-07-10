@@ -528,9 +528,16 @@ function orderKindLabel(order) {
   return "订单";
 }
 
+function orderRewardLabel(order) {
+  if (order.kind === "rush") return "+10秒";
+  if (order.kind === "bulk") return tray.slots < MAX_TRAY_SLOTS ? "+1槽" : "+8秒";
+  if (order.kind === "dual") return activeItems().some((item) => item.linkedUid) ? "解链" : "+7秒";
+  return "+5秒";
+}
+
 function drawQueuedOrder() {
   if (!queuedOrder) return;
-  const w = queuedOrder.lines.length > 1 ? 272 : 222;
+  const w = queuedOrder.lines.length > 1 ? 310 : 260;
   const h = 28;
   const x = W / 2 - w / 2;
   const y = 91;
@@ -542,10 +549,11 @@ function drawQueuedOrder() {
   ctx.stroke();
 
   drawText("下一单", x + 15, y + h / 2, 13, "#5f6c78", 800, "left");
-  drawText(orderKindLabel(queuedOrder), x + 70, y + h / 2, 13, queuedOrder.kind === "rush" ? "#d94f43" : "#5f6c78", 800, "left");
+  drawText(orderKindLabel(queuedOrder), x + 66, y + h / 2, 13, queuedOrder.kind === "rush" ? "#d94f43" : "#5f6c78", 800, "left");
+  drawText(orderRewardLabel(queuedOrder), x + 105, y + h / 2, 12, "#16825d", 800, "left");
   queuedOrder.lines.forEach((line, index) => {
     const type = itemType(line.typeId);
-    const lineX = x + 124 + index * 72;
+    const lineX = x + 158 + index * 72;
     drawMiniItem(type, lineX, y + h / 2, 21);
     drawText(`x${line.needed}`, lineX + 17, y + h / 2, 13, "#34414d", 800, "left");
   });
@@ -586,6 +594,7 @@ function drawOrders() {
 
     const label = order.kind === "rush" ? "急单" : order.kind === "bulk" ? "大单" : order.kind === "dual" ? "双品" : "订单";
     drawText(label, x + 16, y + 20, 16, order.kind === "rush" ? "#e85d4f" : "#6b7886", 800, "left");
+    drawText(orderRewardLabel(order), x + cardW - 14, y + 37, 11, "#16825d", 800, "right");
 
     if (order.kind === "rush") {
       const ratio = Math.max(0, order.patience / order.maxPatience);
@@ -1384,6 +1393,52 @@ function thawFrozenByMatch() {
   thawFrozenStep("match");
 }
 
+function releaseOneLinkedPair() {
+  const first = activeItems().find((item) => item.linkedUid);
+  if (!first) return false;
+  const second = activeItems().find((item) => item.uid === first.linkedUid);
+  const released = second ? [first, second] : [first];
+  released.forEach((item) => {
+    item.variant = "normal";
+    item.linkedUid = null;
+    pulseItems.add(item.uid);
+  });
+  setTimeout(() => released.forEach((item) => pulseItems.delete(item.uid)), 1100);
+  return true;
+}
+
+function applyOrderCompletionReward(order) {
+  let rewardText = "";
+  if (order.kind === "rush") {
+    timeLeft += 10;
+    rewardText = "急单 +10秒";
+  } else if (order.kind === "bulk") {
+    if (tray.slots < MAX_TRAY_SLOTS) {
+      tray.slots += 1;
+      rewardText = `大单扩槽 ${tray.slots}/${MAX_TRAY_SLOTS}`;
+    } else {
+      timeLeft += 8;
+      rewardText = "满槽转 +8秒";
+    }
+  } else if (order.kind === "dual") {
+    if (releaseOneLinkedPair()) {
+      rewardText = "双品解链";
+    } else {
+      timeLeft += 7;
+      rewardText = "无链转 +7秒";
+    }
+  } else {
+    timeLeft += 5;
+    rewardText = "普通单 +5秒";
+  }
+
+  if (lastShipmentHadBonus) {
+    timeLeft += 5;
+    rewardText += " 星标+5秒";
+  }
+  return rewardText;
+}
+
 function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
   const order = targetOrderId
     ? orders.find((entry) => entry.id === targetOrderId)
@@ -1401,9 +1456,10 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null) {
       completedOrders += 1;
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
       score += 90 + bonus + combo * 15 + (lastShipmentHadBonus ? 45 : 0);
-      toast(combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label} 订单`);
+      const rewardText = applyOrderCompletionReward(order);
+      const completionText = combo > 1 ? `连单 x${combo}` : `完成 ${itemType(typeId).label}订单`;
+      toast(`${completionText} · ${rewardText}`);
       replaceOrder(order);
-      timeLeft += (order.kind === "rush" ? 9 : 5) + (lastShipmentHadBonus ? 5 : 0);
       queueMatchCheck();
     } else {
       toast(`${itemType(typeId).label} 已出货，还差一项`);
