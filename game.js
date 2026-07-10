@@ -122,6 +122,9 @@ let bombsCreated = 0;
 let emergencyThawTimer = 0;
 let pendingShipment = null;
 let deliveryFlights = [];
+let trackableShelfRows = new Set();
+let clearedShelfRows = new Map();
+let clearanceSweep = null;
 let hoverItemUid = null;
 let pulseItems = new Set();
 let shakeItems = new Set();
@@ -250,22 +253,36 @@ function hasAnyPossibleTriple() {
 }
 
 function cleanupStrayGoods() {
-  if (remainingItemCount() === 0 || hasAnyPossibleTriple()) return false;
+  if (clearanceSweep || remainingItemCount() === 0 || hasAnyPossibleTriple()) return false;
   const cleaned = remainingItemCount();
-  items.forEach((item) => {
-    if (item.variant !== "bomb") item.cleared = true;
+  const goods = activeItems()
+    .filter((item) => item.variant !== "bomb")
+    .map((item, index) => ({ ...itemCenter(item), typeId: item.typeId, delay: index * 24 }));
+  trayItems.forEach((item, index) => {
+    if (item.variant === "bomb") return;
+    goods.push({ ...trayItemCenter(index), typeId: item.typeId, delay: goods.length * 24 });
   });
-  trayItems = trayItems.filter((item) => item.variant === "bomb");
+  items.forEach((item) => {
+    item.cleared = true;
+  });
+  trayItems = [];
   score += cleaned * 12;
+  beginClearanceSweep(goods, cleaned);
+  updateClearedShelfRows();
   toast(`尾货打包清仓 ${cleaned} 件`);
   return true;
 }
 
 function checkClearWin() {
   if (pendingShipment) return false;
-  cleanupStrayGoods();
+  if (cleanupStrayGoods()) return true;
   if (remainingItemCount() === 0 && state === "playing") {
-    win();
+    items.forEach((item) => {
+      item.cleared = true;
+    });
+    trayItems = [];
+    updateClearedShelfRows();
+    beginClearanceSweep([], 0);
     return true;
   }
   return false;
@@ -463,6 +480,9 @@ function startLevel(nextLevel = level, startState = "playing") {
   emergencyThawTimer = 0;
   pendingShipment = null;
   deliveryFlights = [];
+  trackableShelfRows = new Set();
+  clearedShelfRows = new Map();
+  clearanceSweep = null;
   pulseItems = new Set();
   shakeItems = new Set();
   confetti = [];
@@ -476,6 +496,7 @@ function startLevel(nextLevel = level, startState = "playing") {
     orders.push(createOrder());
   }
   buildInitialItems();
+  trackableShelfRows = new Set(activeItems().map((item) => item.row));
   queuedOrder = createOrderFromStock(preferredRefillType());
   stabilizeBoard();
   updateHud();
@@ -639,7 +660,25 @@ function drawMiniItem(type, x, y, size) {
   drawText(type.label, x, y, size * 0.36, "#ffffff", 900);
 }
 
-function drawShelf() {
+function updateClearedShelfRows() {
+  const occupiedRows = new Set(activeItems().map((item) => item.row));
+  trackableShelfRows.forEach((row) => {
+    if (occupiedRows.has(row)) {
+      clearedShelfRows.delete(row);
+    } else if (!clearedShelfRows.has(row)) {
+      clearedShelfRows.set(row, performance.now());
+    }
+  });
+}
+
+function shelfRowVisibility(row, now) {
+  const clearedAt = clearedShelfRows.get(row);
+  if (clearedAt === undefined) return 1;
+  const progress = Math.min(1, Math.max(0, (now - clearedAt) / 440));
+  return Math.pow(1 - progress, 2);
+}
+
+function drawShelf(now = performance.now()) {
   roundRect(shelf.x - 18, shelf.y - 22, shelf.w + 36, shelf.h + 42, 20);
   ctx.fillStyle = "#d8aa72";
   ctx.fill();
@@ -648,25 +687,41 @@ function drawShelf() {
   ctx.fillStyle = "#f7d397";
   ctx.fill();
 
-  ctx.strokeStyle = "#9f6d3d";
   ctx.lineWidth = 8;
   for (let r = 1; r < shelf.rows; r += 1) {
     const y = shelf.y + r * cellH;
+    const visibility = shelfRowVisibility(r - 1, now);
+    const halfWidth = (shelf.w * visibility) / 2;
+    ctx.strokeStyle = `rgba(159, 109, 61, ${visibility})`;
     ctx.beginPath();
-    ctx.moveTo(shelf.x, y);
-    ctx.lineTo(shelf.x + shelf.w, y);
+    ctx.moveTo(shelf.x + shelf.w / 2 - halfWidth, y);
+    ctx.lineTo(shelf.x + shelf.w / 2 + halfWidth, y);
     ctx.stroke();
   }
 
   ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(159, 109, 61, 0.38)";
-  for (let c = 1; c < shelf.cols; c += 1) {
-    const x = shelf.x + c * cellW;
-    ctx.beginPath();
-    ctx.moveTo(x, shelf.y + 8);
-    ctx.lineTo(x, shelf.y + shelf.h - 8);
-    ctx.stroke();
+  for (let row = 0; row < shelf.rows; row += 1) {
+    const visibility = shelfRowVisibility(row, now);
+    const rowCenter = shelf.y + row * cellH + cellH / 2;
+    const halfHeight = Math.max(0, (cellH / 2 - 8) * visibility);
+    ctx.strokeStyle = `rgba(159, 109, 61, ${0.38 * visibility})`;
+    for (let c = 1; c < shelf.cols; c += 1) {
+      const x = shelf.x + c * cellW;
+      ctx.beginPath();
+      ctx.moveTo(x, rowCenter - halfHeight);
+      ctx.lineTo(x, rowCenter + halfHeight);
+      ctx.stroke();
+    }
   }
+
+  clearedShelfRows.forEach((clearedAt, row) => {
+    const elapsed = now - clearedAt;
+    if (elapsed < 520) {
+      const alpha = Math.sin(Math.min(1, elapsed / 520) * Math.PI) * 0.16;
+      ctx.fillStyle = `rgba(72, 168, 104, ${alpha})`;
+      ctx.fillRect(shelf.x + 4, shelf.y + row * cellH + 4, shelf.w - 8, cellH - 8);
+    }
+  });
 }
 
 function itemCenter(item) {
@@ -963,6 +1018,62 @@ function drawConfetti() {
   });
 }
 
+function beginClearanceSweep(goods, cleaned) {
+  if (clearanceSweep) return;
+  clearanceSweep = {
+    goods,
+    cleaned,
+    startedAt: performance.now(),
+    duration: cleaned > 0 ? Math.min(1120, 760 + goods.length * 18) : 520
+  };
+  state = "clearing";
+}
+
+function updateClearanceSweep(now) {
+  if (!clearanceSweep || now - clearanceSweep.startedAt < clearanceSweep.duration) return;
+  clearanceSweep = null;
+  win();
+}
+
+function drawClearanceSweep(now) {
+  if (!clearanceSweep || clearanceSweep.cleaned === 0) return;
+  const elapsed = now - clearanceSweep.startedAt;
+  const crateX = W / 2;
+  const crateY = shelf.y + shelf.h * 0.62;
+  const reveal = Math.min(1, elapsed / 180);
+
+  ctx.save();
+  ctx.globalAlpha = reveal;
+  ctx.shadowColor = "rgba(62, 43, 22, 0.3)";
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  roundRect(crateX - 92, crateY - 38, 184, 90, 12);
+  ctx.fillStyle = "#d99a4d";
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "#8c5928";
+  ctx.stroke();
+  ctx.fillStyle = "#f0bd6f";
+  ctx.fillRect(crateX - 12, crateY - 35, 24, 84);
+  drawText(`尾货清仓 x${clearanceSweep.cleaned}`, crateX, crateY + 17, 19, "#4f351d", 900);
+  ctx.restore();
+
+  clearanceSweep.goods.forEach((good) => {
+    const travelDuration = clearanceSweep.duration * 0.68;
+    const progress = Math.min(1, Math.max(0, (elapsed - good.delay) / travelDuration));
+    if (progress >= 1) return;
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const x = good.x + (crateX - good.x) * eased;
+    const baseY = good.y + (crateY - 22 - good.y) * eased;
+    const y = baseY - Math.sin(Math.PI * eased) * 58;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (1 - eased) * 2.4);
+    drawMiniItem(itemType(good.typeId), x, y, 36 - eased * 12);
+    ctx.restore();
+  });
+}
+
 function drawShipmentCrate(now) {
   if (!pendingShipment) return;
   const type = itemType(pendingShipment.typeId);
@@ -1035,13 +1146,14 @@ function drawDeliveryFlights(now) {
 
 function render(now = performance.now()) {
   drawBackground();
-  drawShelf();
+  drawShelf(now);
   drawLinkedChains();
   drawItems();
   drawShipmentCrate(now);
   drawTray();
   drawConfetti();
   drawDeliveryFlights(now);
+  drawClearanceSweep(now);
   drawMessages(now);
 }
 
@@ -1092,6 +1204,8 @@ function gameLoop(now) {
       fail("顾客等太久了");
     }
     updateHud();
+  } else if (state === "clearing") {
+    updateClearanceSweep(now);
   }
 
   confetti = confetti
@@ -1198,6 +1312,7 @@ function useBombOnTray(targetIndex) {
   trayItems.splice(first, 1);
   trayItems.splice(second, 1);
   returnItemToShelf(targetItem);
+  updateClearedShelfRows();
   score += 12;
   toast("炸弹把目标退回货架");
   bombDrag = null;
@@ -1264,6 +1379,7 @@ function addToTray(item) {
     }
     trayItems.push(trayItem);
   });
+  updateClearedShelfRows();
 
   if (bundle.length > 1) {
     toast("捆绑货一起进槽了");
