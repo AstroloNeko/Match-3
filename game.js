@@ -34,6 +34,11 @@ const diagnosticList = document.getElementById("diagnosticList");
 const copyReportBtn = document.getElementById("copyReportBtn");
 const closeDiagnosticsBtn = document.getElementById("closeDiagnosticsBtn");
 const modalDiagnosticsBtn = document.getElementById("modalDiagnosticsBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+const pauseOverlay = document.getElementById("pauseOverlay");
+const resumeBtn = document.getElementById("resumeBtn");
+const pauseTutorialBtn = document.getElementById("pauseTutorialBtn");
+const pauseTutorialPanel = document.getElementById("pauseTutorialPanel");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -146,6 +151,7 @@ let diagnosticEvents = [];
 let requestedStartLevel = 1;
 let diagnosticsPreviousState = "playing";
 let generationReport = null;
+let pausePreviousState = "playing";
 
 function hashSeed(value) {
   let hash = 2166136261;
@@ -1018,6 +1024,19 @@ function openDiagnostics() {
 function closeDiagnostics() {
   diagnosticsOverlay.classList.add("is-hidden");
   if (state === "paused") state = diagnosticsPreviousState === "playing" ? "playing" : diagnosticsPreviousState;
+}
+
+function openPauseMenu() {
+  if (state !== "playing") return;
+  pausePreviousState = state;
+  state = "paused";
+  pauseTutorialPanel.classList.add("is-hidden");
+  pauseOverlay.classList.remove("is-hidden");
+}
+
+function closePauseMenu() {
+  pauseOverlay.classList.add("is-hidden");
+  if (state === "paused") state = pausePreviousState;
 }
 
 function updateHud() {
@@ -2561,9 +2580,33 @@ canvas.addEventListener("pointercancel", () => {
   bombDrag = null;
 });
 
-restartBtn.addEventListener("click", () => startLevel(level));
-hintBtn.addEventListener("click", showHint);
-reviveBtn.addEventListener("click", rewardSlot);
+pauseBtn.addEventListener("click", openPauseMenu);
+resumeBtn.addEventListener("click", closePauseMenu);
+restartBtn.addEventListener("click", () => {
+  pauseOverlay.classList.add("is-hidden");
+  startLevel(level);
+});
+hintBtn.addEventListener("click", () => {
+  closePauseMenu();
+  showHint();
+});
+reviveBtn.addEventListener("click", () => {
+  closePauseMenu();
+  rewardSlot();
+});
+pauseTutorialBtn.addEventListener("click", () => {
+  pauseTutorialPanel.classList.toggle("is-hidden");
+});
+document.addEventListener?.("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!diagnosticsOverlay.classList.contains("is-hidden")) {
+    closeDiagnostics();
+  } else if (!pauseOverlay.classList.contains("is-hidden")) {
+    closePauseMenu();
+  } else {
+    openPauseMenu();
+  }
+});
 startBtn.addEventListener("click", () => {
   startOverlay.classList.add("is-hidden");
   startLevel(requestedStartLevel);

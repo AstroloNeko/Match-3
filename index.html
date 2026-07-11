@@ -21,27 +21,38 @@
           <p class="label">时间</p>
           <strong id="timeText">60</strong>
         </div>
+        <button id="pauseBtn" class="iconButton" type="button" aria-label="暂停" title="暂停">Ⅱ</button>
       </section>
 
       <canvas id="game" width="720" height="1380" aria-label="订单货架三消游戏画布"></canvas>
-
-      <section class="controls" aria-label="游戏操作">
-        <button id="restartBtn" type="button">重开</button>
-        <button id="hintBtn" type="button">提示</button>
-        <button id="reviveBtn" type="button">卡槽+1</button>
-      </section>
-
-      <section class="diagnosticsBar" aria-label="关卡复现与诊断">
-        <button id="seedBtn" type="button" title="复制当前关卡复现链接">
-          <span>种子</span>
-          <strong id="seedText">-------</strong>
-        </button>
-        <button id="diagnosticsBtn" type="button">
-          <span>诊断</span>
-          <strong id="diagnosticCount">0</strong>
-        </button>
-      </section>
     </main>
+
+    <div id="pauseOverlay" class="overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <div class="modal pausePanel">
+        <p class="label">游戏已暂停</p>
+        <h1 id="pauseTitle">休息一下</h1>
+        <button id="resumeBtn" class="resumeButton" type="button">继续游戏</button>
+        <div class="pauseActions" aria-label="游戏操作">
+          <button id="hintBtn" type="button">提示</button>
+          <button id="reviveBtn" type="button">卡槽+1</button>
+          <button id="restartBtn" type="button">重开本关</button>
+          <button id="pauseTutorialBtn" type="button">玩法说明</button>
+        </div>
+        <section id="pauseTutorialPanel" class="pauseTutorial is-hidden" aria-label="玩法说明">
+          <p>按订单凑齐三个同类商品。灰色货物需先移走上层；冰冻货经历一次三消后解冻；炸弹可拖到卡槽商品上腾出位置。</p>
+        </section>
+        <div class="pauseDiagnostics" aria-label="关卡复现与诊断">
+          <button id="seedBtn" type="button" title="复制当前关卡复现链接">
+            <span>复制种子</span>
+            <strong id="seedText">-------</strong>
+          </button>
+          <button id="diagnosticsBtn" type="button">
+            <span>局面诊断</span>
+            <strong id="diagnosticCount">0</strong>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div id="startOverlay" class="startOverlay" role="dialog" aria-modal="true">
       <div class="startPanel">
