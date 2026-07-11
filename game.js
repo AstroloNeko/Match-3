@@ -15,6 +15,7 @@ const hintBtn = document.getElementById("hintBtn");
 const reviveBtn = document.getElementById("reviveBtn");
 const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
+const continueBtn = document.getElementById("continueBtn");
 const tutorialBtn = document.getElementById("tutorialBtn");
 const tutorialPanel = document.getElementById("tutorialPanel");
 const difficultyOverlay = document.getElementById("difficultyOverlay");
@@ -48,6 +49,7 @@ const BASE_TRAY_SLOTS = 9;
 const MAX_TRAY_SLOTS = 11;
 const ORDER_COUNT = 4;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
+const SAVE_KEY = "match3ShelfActiveGameV1";
 const MAX_BOMBS_PER_LEVEL = 3;
 const EMERGENCY_THAW_COOLDOWN = 1.15;
 let cellW = shelf.w / shelf.cols;
@@ -152,6 +154,7 @@ let requestedStartLevel = 1;
 let diagnosticsPreviousState = "playing";
 let generationReport = null;
 let pausePreviousState = "playing";
+let lastAutoSaveAt = 0;
 
 function hashSeed(value) {
   let hash = 2166136261;
@@ -850,6 +853,121 @@ function buildInitialItems() {
   }
 }
 
+function clearActiveSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch (error) {
+    // Storage can be unavailable in private browsing or embedded previews.
+  }
+  continueBtn.disabled = true;
+  continueBtn.title = "暂无可继续的关卡";
+}
+
+function readActiveSave() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+    if (!saved || saved.version !== 1 || !Array.isArray(saved.items) || !Array.isArray(saved.orders)) return null;
+    return saved;
+  } catch (error) {
+    return null;
+  }
+}
+
+function refreshContinueButton() {
+  const saved = readActiveSave();
+  continueBtn.disabled = !saved;
+  continueBtn.title = saved ? `继续第 ${saved.level} 关` : "暂无可继续的关卡";
+  continueBtn.textContent = saved ? `继续 L${saved.level}` : "继续";
+}
+
+function saveActiveGame() {
+  if (state !== "playing" && state !== "paused") return;
+  const snapshot = {
+    version: 1,
+    savedAt: Date.now(),
+    level,
+    runSeed,
+    randomState,
+    items,
+    trayItems,
+    traySlots: tray.slots,
+    orders,
+    queuedOrder,
+    completedOrders,
+    score,
+    runScore,
+    combo,
+    timeLeft,
+    nextUid,
+    nextOrderId,
+    bombsCreated,
+    emergencyThawTimer,
+    pendingShipment,
+    trackableShelfRows: [...trackableShelfRows],
+    clearedShelfRows: [...clearedShelfRows.entries()],
+    diagnosticEvents,
+    generationReport
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+    refreshContinueButton();
+  } catch (error) {
+    // Keep the game playable when storage quota or browser policy blocks saves.
+  }
+}
+
+function restoreActiveGame() {
+  const saved = readActiveSave();
+  if (!saved) {
+    refreshContinueButton();
+    return false;
+  }
+  level = Math.max(1, saved.level || 1);
+  runSeed = normalizeSeed(saved.runSeed);
+  initializeLevelRandom(level);
+  randomState = saved.randomState || randomState;
+  currentConfig = levelConfig(level);
+  configureShelf(currentConfig);
+  items = saved.items;
+  trayItems = saved.trayItems || [];
+  tray.slots = Math.max(BASE_TRAY_SLOTS, Math.min(MAX_TRAY_SLOTS, saved.traySlots || BASE_TRAY_SLOTS));
+  orders = saved.orders;
+  queuedOrder = saved.queuedOrder || null;
+  completedOrders = saved.completedOrders || 0;
+  score = saved.score || 0;
+  runScore = saved.runScore || 0;
+  combo = saved.combo || 0;
+  timeLeft = Math.max(1, saved.timeLeft || currentConfig.timeLimit);
+  nextUid = saved.nextUid || 1;
+  nextOrderId = saved.nextOrderId || 1;
+  bombsCreated = saved.bombsCreated || 0;
+  emergencyThawTimer = saved.emergencyThawTimer || 0;
+  pendingShipment = saved.pendingShipment || null;
+  if (pendingShipment) pendingShipment.createdAt = performance.now();
+  trackableShelfRows = new Set(saved.trackableShelfRows || activeItems().map((item) => item.row));
+  clearedShelfRows = new Map(saved.clearedShelfRows || []);
+  diagnosticEvents = saved.diagnosticEvents || [];
+  generationReport = saved.generationReport || null;
+  deliveryFlights = [];
+  clearanceSweep = null;
+  pulseItems = new Set();
+  shakeItems = new Set();
+  confetti = [];
+  bombDrag = null;
+  hoverItemUid = null;
+  message = "";
+  messageUntil = 0;
+  state = "playing";
+  lastTick = performance.now();
+  startOverlay.classList.add("is-hidden");
+  overlay.classList.add("is-hidden");
+  difficultyOverlay.classList.add("is-hidden");
+  updateHud();
+  updateLeaderboardPanel();
+  toast(`已继续第 ${level} 关`);
+  return true;
+}
+
 function startLevel(nextLevel = level, startState = "playing") {
   if (nextLevel === 1) {
     runScore = 0;
@@ -897,6 +1015,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   stabilizeBoard();
   updateHud();
   updateLeaderboardPanel();
+  if (state === "playing") saveActiveGame();
 }
 
 function countTypes(source) {
@@ -1030,6 +1149,7 @@ function openPauseMenu() {
   if (state !== "playing") return;
   pausePreviousState = state;
   state = "paused";
+  saveActiveGame();
   pauseTutorialPanel.classList.add("is-hidden");
   pauseOverlay.classList.remove("is-hidden");
 }
@@ -1045,6 +1165,7 @@ function updateHud() {
   timeText.textContent = Math.ceil(timeLeft);
   reviveBtn.textContent = tray.slots >= MAX_TRAY_SLOTS ? "已满级" : "卡槽+1";
   reviveBtn.disabled = tray.slots >= MAX_TRAY_SLOTS && state === "playing";
+  reviveBtn.classList.toggle("is-hidden", state !== "playing" || tray.slots >= MAX_TRAY_SLOTS);
   updateDiagnosticBadge();
 }
 
@@ -1798,6 +1919,10 @@ function gameLoop(now) {
       fail("顾客等太久了");
     }
     updateHud();
+    if (now - lastAutoSaveAt >= 1000) {
+      lastAutoSaveAt = now;
+      saveActiveGame();
+    }
   } else if (state === "clearing") {
     updateClearanceSweep(now);
   }
@@ -2448,6 +2573,7 @@ function toast(text) {
 
 function win() {
   state = "won";
+  clearActiveSave();
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
   showModal("通关", "货柜清空", `完成 ${completedOrders} 单，清空全部货物。下一关货架更大、遮挡更重。`, "下一关");
@@ -2458,6 +2584,7 @@ function fail(reason) {
   if (state !== "playing") return;
   recordDiagnostic("failure", `失败：${reason}`);
   state = "failed";
+  clearActiveSave();
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
   showModal("失败", reason, "可以重开，也可以模拟一次激励广告增加 1 个卡槽。", "看广告扩槽");
@@ -2607,10 +2734,19 @@ document.addEventListener?.("keydown", (event) => {
     openPauseMenu();
   }
 });
+document.addEventListener?.("visibilitychange", () => {
+  if (document.hidden) saveActiveGame();
+});
 startBtn.addEventListener("click", () => {
+  clearActiveSave();
+  if (!startupParams.has("seed")) {
+    runSeed = generateRunSeed();
+    requestedStartLevel = 1;
+  }
   startOverlay.classList.add("is-hidden");
   startLevel(requestedStartLevel);
 });
+continueBtn.addEventListener("click", restoreActiveGame);
 tutorialBtn.addEventListener("click", () => {
   tutorialPanel.classList.toggle("is-hidden");
 });
@@ -2642,4 +2778,5 @@ runSeed = normalizeSeed(startupParams.get("seed"));
 requestedStartLevel = Math.max(1, Math.min(99, Number.parseInt(startupParams.get("level") || "1", 10) || 1));
 if (requestedStartLevel > 1) startBtn.textContent = `开始第 ${requestedStartLevel} 关`;
 startLevel(requestedStartLevel, "menu");
+refreshContinueButton();
 requestAnimationFrame(gameLoop);

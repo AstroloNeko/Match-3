@@ -25,6 +25,7 @@
       </section>
 
       <canvas id="game" width="720" height="1380" aria-label="订单货架三消游戏画布"></canvas>
+      <button id="reviveBtn" class="slotBoostButton is-hidden" type="button">卡槽+1</button>
     </main>
 
     <div id="pauseOverlay" class="overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
@@ -34,7 +35,6 @@
         <button id="resumeBtn" class="resumeButton" type="button">继续游戏</button>
         <div class="pauseActions" aria-label="游戏操作">
           <button id="hintBtn" type="button">提示</button>
-          <button id="reviveBtn" type="button">卡槽+1</button>
           <button id="restartBtn" type="button">重开本关</button>
           <button id="pauseTutorialBtn" type="button">玩法说明</button>
         </div>
@@ -74,7 +74,8 @@
           </div>
         </section>
         <div class="startActions">
-          <button id="startBtn" type="button">开始游戏</button>
+          <button id="startBtn" type="button">新游戏</button>
+          <button id="continueBtn" type="button">继续</button>
           <button id="tutorialBtn" type="button">玩法教程</button>
         </div>
         <section id="tutorialPanel" class="tutorialPanel is-hidden" aria-label="玩法教程">

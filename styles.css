@@ -119,6 +119,23 @@ canvas {
   touch-action: none;
 }
 
+.slotBoostButton {
+  position: fixed;
+  z-index: 10;
+  right: max(12px, calc((100vw - 500px) / 2 + 12px));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  min-height: 42px;
+  padding: 0 15px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 22px;
+  background: var(--accent);
+  box-shadow: 0 8px 20px rgba(34, 49, 63, 0.24);
+}
+
+.slotBoostButton.is-hidden {
+  display: none;
+}
+
 @media (max-width: 560px) {
   body {
     padding: 4px;
@@ -361,6 +378,20 @@ button:active {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 18px;
+}
+
+.startActions {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.startActions button {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+#continueBtn:disabled {
+  background: #aeb7c2;
+  cursor: default;
 }
 
 .resultActions {
