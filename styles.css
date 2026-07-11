@@ -381,7 +381,52 @@ button:active {
 }
 
 .startActions {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
+}
+
+#rogueBtn {
+  background: #286f68;
+}
+
+.upgradePanel {
+  width: min(100%, 430px);
+}
+
+.upgradePanel > p:not(.label) {
+  color: var(--muted);
+}
+
+.upgradeChoices {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.upgradeChoice {
+  min-height: 74px;
+  padding: 12px 14px;
+  border: 1px solid #d7e2df;
+  background: #f3f8f7;
+  color: var(--ink);
+  text-align: left;
+}
+
+.upgradeChoice strong,
+.upgradeChoice span {
+  display: block;
+}
+
+.upgradeChoice strong {
+  margin-bottom: 6px;
+  color: #286f68;
+  font-size: 17px;
+}
+
+.upgradeChoice span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .startActions button {

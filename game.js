@@ -16,6 +16,7 @@ const reviveBtn = document.getElementById("reviveBtn");
 const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
 const continueBtn = document.getElementById("continueBtn");
+const rogueBtn = document.getElementById("rogueBtn");
 const tutorialBtn = document.getElementById("tutorialBtn");
 const tutorialPanel = document.getElementById("tutorialPanel");
 const difficultyOverlay = document.getElementById("difficultyOverlay");
@@ -40,6 +41,8 @@ const pauseOverlay = document.getElementById("pauseOverlay");
 const resumeBtn = document.getElementById("resumeBtn");
 const pauseTutorialBtn = document.getElementById("pauseTutorialBtn");
 const pauseTutorialPanel = document.getElementById("pauseTutorialPanel");
+const upgradeOverlay = document.getElementById("upgradeOverlay");
+const upgradeChoices = document.getElementById("upgradeChoices");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -50,6 +53,7 @@ const MAX_TRAY_SLOTS = 11;
 const ORDER_COUNT = 4;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 const SAVE_KEY = "match3ShelfActiveGameV1";
+const ROGUE_SAVE_KEY = "match3ShelfRogueRunV1";
 const MAX_BOMBS_PER_LEVEL = 3;
 const EMERGENCY_THAW_COOLDOWN = 1.15;
 let cellW = shelf.w / shelf.cols;
@@ -155,6 +159,22 @@ let diagnosticsPreviousState = "playing";
 let generationReport = null;
 let pausePreviousState = "playing";
 let lastAutoSaveAt = 0;
+let gameMode = "campaign";
+let rogueRun = { floor: 1, upgrades: [] };
+
+const rogueUpgrades = [
+  { id: "slot", name: "扩建仓位", description: "本局后续楼层的卡槽永久 +1。" },
+  { id: "bomb", name: "爆破补给", description: "每层货架额外生成 1 枚炸弹。" },
+  { id: "star", name: "星级服务", description: "星标货的时间奖励额外 +2 秒。" },
+  { id: "cold", name: "冷链升级", description: "冷链货出货时额外奖励 3 秒。" },
+  { id: "clock", name: "弹性排班", description: "每层开始时额外获得 12 秒。" },
+  { id: "insurance", name: "急单保险", description: "每层第一次急单超时不扣时间。" }
+];
+let rogueInsuranceReady = false;
+
+function rogueUpgradeCount(id) {
+  return gameMode === "rogue" ? rogueRun.upgrades.filter((upgradeId) => upgradeId === id).length : 0;
+}
 
 function hashSeed(value) {
   let hash = 2166136261;
@@ -812,9 +832,10 @@ function buildInitialItems() {
   }
 
   const plan = buildTripleTypePlan(pool);
-  const bombCount = currentConfig.bombItemChance > 0
+  const baseBombCount = currentConfig.bombItemChance > 0
     ? Math.min(MAX_BOMBS_PER_LEVEL, Math.floor(plan.typeIds.length * currentConfig.bombItemChance))
     : 0;
+  const bombCount = Math.min(MAX_BOMBS_PER_LEVEL, baseBombCount + rogueUpgradeCount("bomb"));
   let candidateItems = [];
   let validation = null;
   let repairSummary = { removedLinkPairs: 0, removedFrozen: 0 };
@@ -855,19 +876,19 @@ function buildInitialItems() {
 
 function clearActiveSave() {
   try {
-    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(gameMode === "rogue" ? ROGUE_SAVE_KEY : SAVE_KEY);
   } catch (error) {
     // Storage can be unavailable in private browsing or embedded previews.
   }
-  continueBtn.disabled = true;
-  continueBtn.title = "暂无可继续的关卡";
+  refreshContinueButton();
 }
 
 function readActiveSave() {
   try {
-    const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
-    if (!saved || saved.version !== 1 || !Array.isArray(saved.items) || !Array.isArray(saved.orders)) return null;
-    return saved;
+    const saves = [SAVE_KEY, ROGUE_SAVE_KEY]
+      .map((key) => JSON.parse(localStorage.getItem(key) || "null"))
+      .filter((saved) => saved?.version === 1 && Array.isArray(saved.items) && Array.isArray(saved.orders));
+    return saves.sort((a, b) => b.savedAt - a.savedAt)[0] || null;
   } catch (error) {
     return null;
   }
@@ -906,10 +927,13 @@ function saveActiveGame() {
     trackableShelfRows: [...trackableShelfRows],
     clearedShelfRows: [...clearedShelfRows.entries()],
     diagnosticEvents,
-    generationReport
+    generationReport,
+    gameMode,
+    rogueRun,
+    rogueInsuranceReady
   };
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(gameMode === "rogue" ? ROGUE_SAVE_KEY : SAVE_KEY, JSON.stringify(snapshot));
     refreshContinueButton();
   } catch (error) {
     // Keep the game playable when storage quota or browser policy blocks saves.
@@ -923,6 +947,9 @@ function restoreActiveGame() {
     return false;
   }
   level = Math.max(1, saved.level || 1);
+  gameMode = saved.gameMode === "rogue" ? "rogue" : "campaign";
+  rogueRun = saved.rogueRun || { floor: level, upgrades: [] };
+  rogueInsuranceReady = Boolean(saved.rogueInsuranceReady);
   runSeed = normalizeSeed(saved.runSeed);
   initializeLevelRandom(level);
   randomState = saved.randomState || randomState;
@@ -980,7 +1007,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   overlay.classList.add("is-hidden");
   difficultyOverlay.classList.add("is-hidden");
   trayItems = [];
-  tray.slots = BASE_TRAY_SLOTS;
+  tray.slots = Math.min(MAX_TRAY_SLOTS, BASE_TRAY_SLOTS + rogueUpgradeCount("slot"));
   orders = [];
   queuedOrder = null;
   completedOrders = 0;
@@ -1000,7 +1027,8 @@ function startLevel(nextLevel = level, startState = "playing") {
   confetti = [];
   bombDrag = null;
   hoverItemUid = null;
-  timeLeft = currentConfig.timeLimit;
+  timeLeft = currentConfig.timeLimit + rogueUpgradeCount("clock") * 12;
+  rogueInsuranceReady = gameMode === "rogue" && rogueUpgradeCount("insurance") > 0;
   message = "";
   messageUntil = 0;
   diagnosticEvents = [];
@@ -1194,7 +1222,7 @@ function drawBackground() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, W, H);
 
-  drawText("订单货架", W / 2, 42, 38, "#22313f", 800);
+  drawText(gameMode === "rogue" ? `肉鸽货架 · ${rogueRun.floor}/6` : "订单货架", W / 2, 42, 38, "#22313f", 800);
   drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.cols}x${shelf.rows}`, W / 2, 76, 19, "#6b7886", 500);
   drawQueuedOrder();
   drawOrders();
@@ -1883,8 +1911,13 @@ function updateOrders(dt) {
     if (order.kind !== "rush" || state !== "playing") return;
     order.patience -= dt;
     if (order.patience <= 0) {
-      timeLeft = Math.max(0, timeLeft - 8);
-      toast("急单超时，扣 8 秒");
+      if (rogueInsuranceReady) {
+        rogueInsuranceReady = false;
+        toast("急单保险生效，本次免罚");
+      } else {
+        timeLeft = Math.max(0, timeLeft - 8);
+        toast("急单超时，扣 8 秒");
+      }
       replaceOrder(order);
       stabilizeBoard();
       queueMatchCheck();
@@ -2319,13 +2352,13 @@ function applyShipmentSpecialRewards(shippedItems) {
   const rewards = [];
 
   if (bonusCount > 0) {
-    const bonusTime = bonusCount * 3;
+    const bonusTime = bonusCount * (3 + rogueUpgradeCount("star") * 2);
     timeLeft += bonusTime;
     rewards.push(bonusCount > 1 ? `星标x${bonusCount}+${bonusTime}秒` : "星标+3秒");
   }
 
   if (coldCount > 0) {
-    timeLeft += 3;
+    timeLeft += 3 + rogueUpgradeCount("cold") * 3;
     if (meltOneShelfFrozen()) {
       rewards.push("冷链+3秒融冰");
     } else {
@@ -2571,12 +2604,42 @@ function toast(text) {
   messageUntil = performance.now() + 950;
 }
 
+function showRogueUpgradeChoices() {
+  const choices = shuffle([...rogueUpgrades]).slice(0, 3);
+  upgradeChoices.replaceChildren();
+  choices.forEach((upgrade) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "upgradeChoice";
+    button.innerHTML = `<strong>${upgrade.name}</strong><span>${upgrade.description}</span>`;
+    button.addEventListener("click", () => {
+      rogueRun.upgrades.push(upgrade.id);
+      rogueRun.floor += 1;
+      upgradeOverlay.classList.add("is-hidden");
+      advanceToLevel(rogueRun.floor);
+    });
+    upgradeChoices.appendChild(button);
+  });
+  upgradeOverlay.classList.remove("is-hidden");
+}
+
 function win() {
   state = "won";
+  if (gameMode === "rogue" && rogueRun.floor < 6) {
+    clearActiveSave();
+    showRogueUpgradeChoices();
+    return;
+  }
   clearActiveSave();
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
-  showModal("通关", "货柜清空", `完成 ${completedOrders} 单，清空全部货物。下一关货架更大、遮挡更重。`, "下一关");
+  const rogueFinished = gameMode === "rogue";
+  showModal(
+    rogueFinished ? "肉鸽试验场" : "通关",
+    rogueFinished ? "六层试炼完成" : "货柜清空",
+    rogueFinished ? `本局获得 ${rogueRun.upgrades.length} 项强化，完成全部六层。` : `完成 ${completedOrders} 单，清空全部货物。下一关货架更大、遮挡更重。`,
+    rogueFinished ? "返回首页" : "下一关"
+  );
   renderModalRecord(totalScore, level, result);
 }
 
@@ -2738,6 +2801,7 @@ document.addEventListener?.("visibilitychange", () => {
   if (document.hidden) saveActiveGame();
 });
 startBtn.addEventListener("click", () => {
+  gameMode = "campaign";
   clearActiveSave();
   if (!startupParams.has("seed")) {
     runSeed = generateRunSeed();
@@ -2746,6 +2810,15 @@ startBtn.addEventListener("click", () => {
   startOverlay.classList.add("is-hidden");
   startLevel(requestedStartLevel);
 });
+rogueBtn.addEventListener("click", () => {
+  gameMode = "rogue";
+  clearActiveSave();
+  runSeed = generateRunSeed();
+  rogueRun = { floor: 1, upgrades: [] };
+  runScore = 0;
+  startOverlay.classList.add("is-hidden");
+  startLevel(1);
+});
 continueBtn.addEventListener("click", restoreActiveGame);
 tutorialBtn.addEventListener("click", () => {
   tutorialPanel.classList.toggle("is-hidden");
@@ -2753,7 +2826,12 @@ tutorialBtn.addEventListener("click", () => {
 
 primaryBtn.addEventListener("click", () => {
   if (state === "won") {
-    if (level === 1) {
+    if (gameMode === "rogue") {
+      overlay.classList.add("is-hidden");
+      state = "menu";
+      startOverlay.classList.remove("is-hidden");
+      refreshContinueButton();
+    } else if (level === 1) {
       overlay.classList.add("is-hidden");
       difficultyOverlay.classList.remove("is-hidden");
     } else {

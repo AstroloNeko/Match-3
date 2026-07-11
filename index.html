@@ -76,6 +76,7 @@
         <div class="startActions">
           <button id="startBtn" type="button">新游戏</button>
           <button id="continueBtn" type="button">继续</button>
+          <button id="rogueBtn" type="button">肉鸽模式</button>
           <button id="tutorialBtn" type="button">玩法教程</button>
         </div>
         <section id="tutorialPanel" class="tutorialPanel is-hidden" aria-label="玩法教程">
@@ -110,6 +111,15 @@
             </article>
           </div>
         </section>
+      </div>
+    </div>
+
+    <div id="upgradeOverlay" class="overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="upgradeTitle">
+      <div class="modal upgradePanel">
+        <p class="label">肉鸽模式 · 三选一</p>
+        <h1 id="upgradeTitle">选择物流强化</h1>
+        <p>强化将在本局后续楼层持续生效。</p>
+        <div id="upgradeChoices" class="upgradeChoices"></div>
       </div>
     </div>
 
