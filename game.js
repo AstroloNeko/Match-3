@@ -37,8 +37,8 @@ const modalDiagnosticsBtn = document.getElementById("modalDiagnosticsBtn");
 
 const W = canvas.width;
 const H = canvas.height;
-const shelf = { x: 40, y: 226, w: 640, h: 560, rows: 6, cols: 7 };
-const tray = { x: 54, y: 825, w: 612, h: 122, slots: 7 };
+const shelf = { x: 40, y: 226, w: 640, h: 900, rows: 6, cols: 7 };
+const tray = { x: 54, y: 1190, w: 612, h: 128, slots: 7 };
 const BASE_TRAY_SLOTS = 9;
 const MAX_TRAY_SLOTS = 11;
 const ORDER_COUNT = 4;
@@ -72,8 +72,8 @@ function levelConfig(levelNumber) {
   }
 
   const spike = tier - 1;
-  const rows = spike < 3 ? 8 : spike < 7 ? 9 : 10;
-  const cols = spike < 2 ? 9 : spike < 5 ? 10 : spike < 9 ? 11 : 12;
+  const rows = spike < 3 ? 10 : spike < 6 ? 12 : spike < 9 ? 13 : 14;
+  const cols = 8;
   const capacity = rows * cols;
   return {
     rows,
@@ -1055,7 +1055,7 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
 
   drawText("订单货架", W / 2, 42, 38, "#22313f", 800);
-  drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.rows}x${shelf.cols}`, W / 2, 76, 19, "#6b7886", 500);
+  drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.cols}x${shelf.rows}`, W / 2, 76, 19, "#6b7886", 500);
   drawQueuedOrder();
   drawOrders();
 }
@@ -1251,7 +1251,7 @@ function itemCenter(item) {
 }
 
 function itemSize(item) {
-  const base = Math.min(68, Math.min(cellW, cellH) * 0.78);
+  const base = Math.min(72, Math.min(cellW, cellH) * 0.9);
   return base + item.layer * 2;
 }
 
@@ -1388,11 +1388,11 @@ function drawItem(item, x, y, size, alpha = 1) {
 
   ctx.fillStyle = blocked ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.92)";
   ctx.beginPath();
-  ctx.arc(0, -size * 0.08, size * 0.23, 0, Math.PI * 2);
+  ctx.arc(0, -size * 0.08, size * 0.25, 0, Math.PI * 2);
   ctx.fill();
 
-  drawText(type.icon, 0, size * 0.19, size * 0.36, "#ffffff", 900);
-  drawText(type.label, 0, -size * 0.1, size * 0.2, blocked ? "#66717d" : type.color, 900);
+  drawText(type.icon, 0, size * 0.21, size * 0.3, "#ffffff", 900);
+  drawText(type.label, 0, -size * 0.08, size * 0.28, blocked ? "#66717d" : type.color, 900);
 
   if (blocked) {
     drawText("锁", size * 0.26, -size * 0.27, size * 0.22, "#ffffff", 900);
@@ -1572,11 +1572,12 @@ function drawTrayLinkedChains() {
 
 function drawMessages(now) {
   if (message && now < messageUntil) {
-    roundRect(94, 774, 532, 52, 26);
+    const messageY = tray.y - 62;
+    roundRect(94, messageY, 532, 52, 26);
     ctx.fillStyle = "rgba(34, 49, 63, 0.86)";
     ctx.fill();
     const messageSize = message.length > 28 ? 14 : message.length > 22 ? 16 : message.length > 17 ? 18 : 22;
-    drawText(message, W / 2, 800, messageSize, "#ffffff", 700);
+    drawText(message, W / 2, messageY + 26, messageSize, "#ffffff", 700);
   }
 }
 
@@ -1817,7 +1818,7 @@ function hitPendingOrder(point) {
 function hitItem(point) {
   const candidates = activeItems().slice().sort(itemHitOrder);
   for (const item of candidates) {
-    if (pointInBounds(point, itemBounds(item), 4)) return item;
+    if (pointInBounds(point, itemBounds(item), 6)) return item;
   }
   return null;
 }

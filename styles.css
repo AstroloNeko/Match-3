@@ -104,13 +104,23 @@ strong {
 
 canvas {
   width: 100%;
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 12 / 23;
   display: block;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff9ed;
   box-shadow: var(--shadow);
   touch-action: none;
+}
+
+@media (max-width: 560px) {
+  body {
+    padding: 4px;
+  }
+
+  .app {
+    gap: 8px;
+  }
 }
 
 button {
