@@ -1526,8 +1526,13 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.shadowBlur = specialGlow && !blocked ? 22 : blocked ? 6 : 14;
   ctx.shadowOffsetY = blocked ? 3 : 8;
   roundRect(-size / 2, -size / 2, size, size, 16);
-  ctx.fillStyle = blocked ? "#aeb7c2" : type.color;
+  ctx.fillStyle = type.color;
   ctx.fill();
+  if (blocked) {
+    roundRect(-size / 2, -size / 2, size, size, 16);
+    ctx.fillStyle = "rgba(82, 91, 101, 0.46)";
+    ctx.fill();
+  }
   ctx.shadowColor = "transparent";
 
   ctx.lineWidth = blocked ? 4 : 5;
@@ -1552,7 +1557,7 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.fill();
 
   drawText(type.icon, 0, size * 0.21, size * 0.3, "#ffffff", 900);
-  drawText(type.label, 0, -size * 0.08, size * 0.28, blocked ? "#66717d" : type.color, 900);
+  drawText(type.label, 0, -size * 0.08, size * 0.28, type.color, 900);
 
   if (blocked) {
     drawText("锁", size * 0.26, -size * 0.27, size * 0.22, "#ffffff", 900);
@@ -1600,7 +1605,7 @@ function drawItems() {
     .sort(itemDrawOrder)
     .forEach((item) => {
       const center = itemCenter(item);
-      drawItem(item, center.x, center.y, itemSize(item), isBlocked(item) ? 0.68 : 1);
+      drawItem(item, center.x, center.y, itemSize(item), isBlocked(item) ? 0.86 : 1);
     });
 }
 
