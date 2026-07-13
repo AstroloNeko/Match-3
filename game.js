@@ -115,7 +115,7 @@ const itemTypes = [
   { id: "book", label: "书", color: "#3f82d7", icon: "B" },
   { id: "ball", label: "球", color: "#f2b84b", icon: "O" },
   { id: "box", label: "盒", color: "#5b3cc4", icon: "X" },
-  { id: "lamp", label: "灯", color: "#e33b72", icon: "L" },
+  { id: "lamp", label: "灯", color: "#8a5a24", icon: "L" },
   { id: "star", label: "星", color: "#008fb3", icon: "S" },
   { id: "shoe", label: "鞋", color: "#7b8794", icon: "U" },
   { id: "cake", label: "糕", color: "#d96c9f", icon: "K" },
@@ -1598,7 +1598,7 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.fill();
   if (blocked) {
     roundRect(-size / 2, -size / 2, size, size, 16);
-    ctx.fillStyle = "rgba(82, 91, 101, 0.75)";
+    ctx.fillStyle = "rgba(82, 91, 101, 0.9)";
     ctx.fill();
   }
   ctx.shadowColor = "transparent";
@@ -1662,6 +1662,12 @@ function drawItem(item, x, y, size, alpha = 1) {
     ctx.stroke();
     drawText("ICE", 0, -size * 0.08, size * 0.22, "#ffffff", 900);
     drawText(`${item.frozenMatches}`, 0, size * 0.2, size * 0.26, "#ffffff", 900);
+  }
+
+  if (!blocked) {
+    roundRect(-size / 2, -size / 2, size, size, 16);
+    ctx.fillStyle = "rgba(20, 26, 32, 0.15)";
+    ctx.fill();
   }
 
   ctx.restore();
