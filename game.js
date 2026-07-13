@@ -141,7 +141,7 @@ let messageUntil = 0;
 let bombDrag = null;
 let bombsCreated = 0;
 let emergencyThawTimer = 0;
-let pendingShipment = null;
+let preferredOrderId = null;
 let deliveryFlights = [];
 let trackableShelfRows = new Set();
 let clearedShelfRows = new Map();
@@ -318,8 +318,7 @@ function selectableItems() {
 function remainingItemCount() {
   const activeGoods = activeItems().filter((item) => item.variant !== "bomb").length;
   const trayGoods = trayItems.filter((item) => item.variant !== "bomb").length;
-  const packedGoods = pendingShipment?.shippedItems.filter((item) => item.variant !== "bomb").length || 0;
-  return activeGoods + trayGoods + packedGoods;
+  return activeGoods + trayGoods;
 }
 
 function remainingTypeCounts() {
@@ -358,7 +357,6 @@ function cleanupStrayGoods() {
 }
 
 function checkClearWin() {
-  if (pendingShipment) return false;
   if (cleanupStrayGoods()) return true;
   if (remainingItemCount() === 0 && state === "playing") {
     items.forEach((item) => {
@@ -923,7 +921,7 @@ function saveActiveGame() {
     nextOrderId,
     bombsCreated,
     emergencyThawTimer,
-    pendingShipment,
+    preferredOrderId,
     trackableShelfRows: [...trackableShelfRows],
     clearedShelfRows: [...clearedShelfRows.entries()],
     diagnosticEvents,
@@ -957,6 +955,9 @@ function restoreActiveGame() {
   configureShelf(currentConfig);
   items = saved.items;
   trayItems = saved.trayItems || [];
+  if (saved.pendingShipment?.shippedItems?.length) {
+    trayItems.push(...saved.pendingShipment.shippedItems);
+  }
   tray.slots = Math.max(BASE_TRAY_SLOTS, Math.min(MAX_TRAY_SLOTS, saved.traySlots || BASE_TRAY_SLOTS));
   orders = saved.orders;
   queuedOrder = saved.queuedOrder || null;
@@ -969,8 +970,7 @@ function restoreActiveGame() {
   nextOrderId = saved.nextOrderId || 1;
   bombsCreated = saved.bombsCreated || 0;
   emergencyThawTimer = saved.emergencyThawTimer || 0;
-  pendingShipment = saved.pendingShipment || null;
-  if (pendingShipment) pendingShipment.createdAt = performance.now();
+  preferredOrderId = saved.preferredOrderId || null;
   trackableShelfRows = new Set(saved.trackableShelfRows || activeItems().map((item) => item.row));
   clearedShelfRows = new Map(saved.clearedShelfRows || []);
   diagnosticEvents = saved.diagnosticEvents || [];
@@ -992,6 +992,7 @@ function restoreActiveGame() {
   updateHud();
   updateLeaderboardPanel();
   toast(`已继续第 ${level} 关`);
+  queueMatchCheck(80);
   return true;
 }
 
@@ -1017,7 +1018,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   nextOrderId = 1;
   bombsCreated = 0;
   emergencyThawTimer = 0;
-  pendingShipment = null;
+  preferredOrderId = null;
   deliveryFlights = [];
   trackableShelfRows = new Set();
   clearedShelfRows = new Map();
@@ -1278,26 +1279,17 @@ function drawOrders() {
     const y = bounds.y - (1 - enterEase) * 24;
     const cardW = bounds.w;
     const h = bounds.h;
-    const canReceivePending = pendingShipment?.orderIds.includes(order.id);
+    const isPreferred = preferredOrderId === order.id;
     ctx.save();
     ctx.globalAlpha = 0.35 + enterEase * 0.65;
     roundRect(x, y, cardW, 86, 14);
-    ctx.fillStyle = canReceivePending ? "#fff8d8" : "#ffffff";
+    ctx.fillStyle = isPreferred ? "#fff8d8" : "#ffffff";
     ctx.fill();
-    ctx.lineWidth = canReceivePending ? 6 : 3;
-    ctx.strokeStyle = canReceivePending ? "#f2b84b" : order.kind === "rush" ? "#e85d4f" : primaryType.color;
+    ctx.lineWidth = isPreferred ? 5 : 3;
+    ctx.strokeStyle = isPreferred ? "#d99518" : order.kind === "rush" ? "#e85d4f" : primaryType.color;
     ctx.stroke();
 
-    if (canReceivePending) {
-      ctx.save();
-      ctx.setLineDash([8, 6]);
-      ctx.lineDashOffset = -performance.now() / 90;
-      roundRect(x + 5, y + 5, cardW - 10, h - 10, 10);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#d99518";
-      ctx.stroke();
-      ctx.restore();
-    }
+    if (isPreferred) drawText("优先", x + cardW - 14, y + 20, 12, "#b47400", 900, "right");
 
     const label = order.kind === "rush" ? "急单" : order.kind === "bulk" ? "大单" : order.kind === "dual" ? "双品" : "订单";
     drawText(label, x + 16, y + 20, 16, order.kind === "rush" ? "#e85d4f" : "#6b7886", 800, "left");
@@ -1816,49 +1808,14 @@ function drawClearanceSweep(now) {
   });
 }
 
-function drawShipmentCrate(now) {
-  if (!pendingShipment) return;
-  const type = itemType(pendingShipment.typeId);
-  const age = Math.max(0, now - pendingShipment.createdAt);
-  const pop = Math.min(1, age / 170);
-  const eased = 1 - Math.pow(1 - pop, 3);
-  const w = 236;
-  const h = 74;
-  const x = W / 2 - w / 2;
-  const y = 210 + (1 - eased) * 18;
-
-  ctx.save();
-  ctx.globalAlpha = eased;
-  ctx.shadowColor = "rgba(62, 43, 22, 0.28)";
-  ctx.shadowBlur = 18;
-  ctx.shadowOffsetY = 8;
-  roundRect(x, y, w, h, 12);
-  ctx.fillStyle = "#f3c77d";
-  ctx.fill();
-  ctx.shadowColor = "transparent";
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "#a86f2f";
-  ctx.stroke();
-
-  ctx.fillStyle = "#d89a4c";
-  ctx.fillRect(x + w / 2 - 13, y + 2, 26, h - 4);
-  ctx.fillStyle = "rgba(255,255,255,0.34)";
-  ctx.fillRect(x + w / 2 - 5, y + 2, 10, h - 4);
-
-  [-22, 0, 22].forEach((offset) => drawMiniItem(type, x + 48 + offset, y + 38, 30));
-  drawText(`${type.label}货 x3`, x + 142, y + 28, 20, "#4f351d", 900);
-  drawText("点击金色订单发货", x + 142, y + 51, 14, "#76512c", 700);
-  ctx.restore();
-}
-
-function launchDeliveryFlight(typeId, orderId, fromPending = false) {
+function launchDeliveryFlight(typeId, orderId) {
   const orderIndex = orders.findIndex((order) => order.id === orderId);
   if (orderIndex < 0) return;
   const target = orderCardBounds(orderIndex);
   deliveryFlights.push({
     typeId,
     fromX: W / 2,
-    fromY: fromPending ? 247 : tray.y + 22,
+    fromY: tray.y + 22,
     toX: target.x + target.w / 2,
     toY: target.y + target.h / 2,
     startedAt: performance.now(),
@@ -1891,7 +1848,6 @@ function render(now = performance.now()) {
   drawShelf(now);
   drawLinkedChains();
   drawItems();
-  drawShipmentCrate(now);
   drawTray();
   drawConfetti();
   drawDeliveryFlights(now);
@@ -1906,7 +1862,6 @@ function queueMatchCheck(delay = 100) {
 }
 
 function updateOrders(dt) {
-  if (pendingShipment) return;
   orders.forEach((order) => {
     if (order.kind !== "rush" || state !== "playing") return;
     order.patience -= dt;
@@ -1982,11 +1937,9 @@ function canvasPoint(event) {
   };
 }
 
-function hitPendingOrder(point) {
-  if (!pendingShipment) return null;
+function hitOrder(point) {
   for (let index = 0; index < orders.length; index += 1) {
     const order = orders[index];
-    if (!pendingShipment.orderIds.includes(order.id)) continue;
     if (pointInBounds(point, orderCardBounds(index))) return order;
   }
   return null;
@@ -2088,26 +2041,31 @@ function orderForType(typeId) {
 function ordersForType(typeId) {
   return orders
     .filter((order) => order.lines.some((line) => line.typeId === typeId && line.progress < line.needed))
-    .sort((a, b) => orderMatchPriority(b, typeId) - orderMatchPriority(a, typeId));
+    .sort((a, b) => compareOrderDispatchPriority(a, b, typeId));
 }
 
-function orderMatchPriority(order, typeId) {
+function orderDispatchTuple(order, typeId) {
   const line = order.lines.find((entry) => entry.typeId === typeId && entry.progress < entry.needed);
-  const urgency =
-    order.kind === "rush" && order.maxPatience
-      ? 90 + (1 - Math.max(0, order.patience) / order.maxPatience) * 35
-      : 0;
-  const partial = line && line.progress > 0 ? 45 : 0;
-  const kind =
-    order.kind === "dual"
-      ? 34
-      : order.kind === "bulk"
-        ? 24
-        : order.kind === "rush"
-          ? 20
-          : 0;
-  const nearDone = line ? (line.progress / line.needed) * 18 : 0;
-  return urgency + partial + kind + nearDone;
+  const rushRatio = order.kind === "rush" && order.maxPatience
+    ? Math.max(0, order.patience) / order.maxPatience
+    : 2;
+  return [
+    order.id === preferredOrderId ? 0 : 1,
+    order.kind === "rush" ? 0 : 1,
+    rushRatio,
+    line && line.needed - line.progress <= 3 ? 0 : 1,
+    line && line.progress > 0 ? 0 : 1,
+    orders.indexOf(order)
+  ];
+}
+
+function compareOrderDispatchPriority(a, b, typeId) {
+  const aPriority = orderDispatchTuple(a, typeId);
+  const bPriority = orderDispatchTuple(b, typeId);
+  for (let index = 0; index < aPriority.length; index += 1) {
+    if (aPriority[index] !== bPriority[index]) return aPriority[index] - bPriority[index];
+  }
+  return 0;
 }
 
 function isOrderComplete(order) {
@@ -2209,7 +2167,6 @@ function triggerLinkedFollowup(shippedItems) {
 }
 
 function checkMatches() {
-  if (pendingShipment) return false;
   const counts = new Map();
   trayItems.forEach((item) => {
     if (item.frozenMatches > 0) return;
@@ -2227,46 +2184,19 @@ function checkMatches() {
       }
       const armedLinkedItem = armedLinkedItemForType(typeId);
       const removedItems = removeTrayTriple(typeId, armedLinkedItem?.uid || null);
-      if (matchingOrders.length > 1) {
-        pendingShipment = {
-          typeId,
-          shippedItems: removedItems,
-          orderIds: matchingOrders.map((order) => order.id),
-          createdAt: performance.now()
-        };
-        toast(`三件${itemType(typeId).label}已装箱，点选要交付的订单`);
-      } else {
-        launchDeliveryFlight(typeId, matchingOrders[0].id);
-        thawFrozenByMatch();
-        resolveShipment(typeId, removedItems, matchingOrders[0].id);
-        triggerLinkedFollowup(removedItems);
-        normalizeDanglingTrayLinks();
-      }
+      const targetOrder = matchingOrders[0];
+      launchDeliveryFlight(typeId, targetOrder.id);
+      thawFrozenByMatch();
+      resolveShipment(typeId, removedItems, targetOrder.id);
+      triggerLinkedFollowup(removedItems);
+      normalizeDanglingTrayLinks();
+      queueMatchCheck(140);
       return true;
     }
   }
   if (hasBlockedTriple) toast("暂时没有这个订单，先卡在槽里");
   if (hasBlockedTriple) recordDiagnostic("order-mismatch", "卡槽已有三消，但当前订单不接收");
   return false;
-}
-
-function dispatchPendingShipment(orderId) {
-  if (!pendingShipment || !pendingShipment.orderIds.includes(orderId)) return false;
-  const order = orders.find((entry) => entry.id === orderId);
-  if (!order || !order.lines.some((line) => line.typeId === pendingShipment.typeId && line.progress < line.needed)) {
-    return false;
-  }
-
-  const shipment = pendingShipment;
-  launchDeliveryFlight(shipment.typeId, orderId, true);
-  pendingShipment = null;
-  thawFrozenByMatch();
-  resolveShipment(shipment.typeId, shipment.shippedItems, orderId);
-  triggerLinkedFollowup(shipment.shippedItems);
-  normalizeDanglingTrayLinks();
-  queueMatchCheck(140);
-  updateHud();
-  return true;
 }
 
 function hasFrozenTrayItems() {
@@ -2443,6 +2373,7 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null, shipme
 function replaceOrder(doneOrder) {
   const index = orders.findIndex((order) => order.id === doneOrder.id);
   if (index === -1) return null;
+  if (preferredOrderId === doneOrder.id) preferredOrderId = null;
   const nextOrder = queuedOrder || createOrderFromStock(preferredRefillType(), doneOrder.id);
   if (!nextOrder) {
     recordDiagnostic("order-exhausted", "剩余库存不足以生成新订单");
@@ -2714,13 +2645,11 @@ function shakeBlocked(item) {
 canvas.addEventListener("pointerdown", (event) => {
   if (state !== "playing") return;
   const point = canvasPoint(event);
-  if (pendingShipment) {
-    const order = hitPendingOrder(point);
-    if (order) {
-      dispatchPendingShipment(order.id);
-    } else {
-      toast("先点选高亮订单，安排这箱货的去向");
-    }
+  const selectedOrder = hitOrder(point);
+  if (selectedOrder) {
+    preferredOrderId = preferredOrderId === selectedOrder.id ? null : selectedOrder.id;
+    toast(preferredOrderId ? `已设为优先${orderKindLabel(selectedOrder)}` : "已取消优先订单");
+    saveActiveGame();
     return;
   }
   const trayHit = hitTrayItem(point);
