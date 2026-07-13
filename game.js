@@ -1664,12 +1664,6 @@ function drawItem(item, x, y, size, alpha = 1) {
     drawText(`${item.frozenMatches}`, 0, size * 0.2, size * 0.26, "#ffffff", 900);
   }
 
-  if (!blocked) {
-    roundRect(-size / 2, -size / 2, size, size, 16);
-    ctx.fillStyle = "rgba(20, 26, 32, 0.15)";
-    ctx.fill();
-  }
-
   ctx.restore();
 }
 
