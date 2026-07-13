@@ -42,6 +42,7 @@ const resumeBtn = document.getElementById("resumeBtn");
 const pauseTutorialBtn = document.getElementById("pauseTutorialBtn");
 const pauseTutorialPanel = document.getElementById("pauseTutorialPanel");
 const soundBtn = document.getElementById("soundBtn");
+const saveExitBtn = document.getElementById("saveExitBtn");
 const upgradeOverlay = document.getElementById("upgradeOverlay");
 const upgradeChoices = document.getElementById("upgradeChoices");
 
@@ -1597,7 +1598,7 @@ function drawItem(item, x, y, size, alpha = 1) {
   ctx.fill();
   if (blocked) {
     roundRect(-size / 2, -size / 2, size, size, 16);
-    ctx.fillStyle = "rgba(82, 91, 101, 0.46)";
+    ctx.fillStyle = "rgba(82, 91, 101, 0.62)";
     ctx.fill();
   }
   ctx.shadowColor = "transparent";
@@ -1672,7 +1673,7 @@ function drawItems() {
     .sort(itemDrawOrder)
     .forEach((item) => {
       const center = itemCenter(item);
-      drawItem(item, center.x, center.y, itemSize(item), isBlocked(item) ? 0.86 : 1);
+      drawItem(item, center.x, center.y, itemSize(item), isBlocked(item) ? 0.82 : 1);
     });
 }
 
@@ -2805,6 +2806,15 @@ soundBtn.addEventListener("click", () => {
   }
   updateSoundButton();
   if (soundEnabled) sounds.pickup();
+});
+saveExitBtn.addEventListener("click", () => {
+  saveActiveGame();
+  pauseOverlay.classList.add("is-hidden");
+  state = "menu";
+  startOverlay.classList.remove("is-hidden");
+  refreshContinueButton();
+  updateLeaderboardPanel();
+  updateHud();
 });
 document.addEventListener?.("keydown", (event) => {
   if (event.key !== "Escape") return;

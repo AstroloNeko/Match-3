@@ -245,6 +245,11 @@ button:active {
   background: var(--accent-dark);
 }
 
+#saveExitBtn {
+  grid-column: 1 / -1;
+  background: #286f68;
+}
+
 .pauseTutorial {
   margin-top: 10px;
   padding: 10px 12px;
