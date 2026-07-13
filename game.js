@@ -41,6 +41,7 @@ const pauseOverlay = document.getElementById("pauseOverlay");
 const resumeBtn = document.getElementById("resumeBtn");
 const pauseTutorialBtn = document.getElementById("pauseTutorialBtn");
 const pauseTutorialPanel = document.getElementById("pauseTutorialPanel");
+const soundBtn = document.getElementById("soundBtn");
 const upgradeOverlay = document.getElementById("upgradeOverlay");
 const upgradeChoices = document.getElementById("upgradeChoices");
 
@@ -54,6 +55,7 @@ const ORDER_COUNT = 4;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 const SAVE_KEY = "match3ShelfActiveGameV1";
 const ROGUE_SAVE_KEY = "match3ShelfRogueRunV1";
+const SOUND_KEY = "match3ShelfSound";
 const MAX_BOMBS_PER_LEVEL = 3;
 const EMERGENCY_THAW_COOLDOWN = 1.15;
 let cellW = shelf.w / shelf.cols;
@@ -171,6 +173,71 @@ const rogueUpgrades = [
   { id: "insurance", name: "急单保险", description: "每层第一次急单超时不扣时间。" }
 ];
 let rogueInsuranceReady = false;
+let audioContext = null;
+let soundEnabled = true;
+
+try {
+  soundEnabled = localStorage.getItem(SOUND_KEY) !== "off";
+} catch (error) {
+  soundEnabled = true;
+}
+
+function updateSoundButton() {
+  soundBtn.textContent = soundEnabled ? "声音：开" : "声音：关";
+}
+
+function ensureAudio() {
+  if (!soundEnabled) return null;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!audioContext) audioContext = new AudioContextClass();
+  if (audioContext.state === "suspended") audioContext.resume();
+  return audioContext;
+}
+
+function playTone(frequency, duration = 0.08, options = {}) {
+  const audio = ensureAudio();
+  if (!audio) return;
+  const { delay = 0, volume = 0.035, type = "sine", endFrequency = frequency } = options;
+  const start = audio.currentTime + delay;
+  const oscillator = audio.createOscillator();
+  const gain = audio.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, start);
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), start + duration);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(volume, start + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(gain);
+  gain.connect(audio.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.01);
+}
+
+const sounds = {
+  pickup() {
+    playTone(520, 0.045, { volume: 0.018, type: "triangle", endFrequency: 610 });
+  },
+  blocked() {
+    playTone(150, 0.09, { volume: 0.025, type: "square", endFrequency: 115 });
+  },
+  match() {
+    [440, 554, 659].forEach((frequency, index) => playTone(frequency, 0.075, { delay: index * 0.045, volume: 0.027, type: "triangle" }));
+  },
+  order() {
+    playTone(659, 0.12, { volume: 0.035, type: "triangle", endFrequency: 784 });
+    playTone(988, 0.14, { delay: 0.07, volume: 0.03, type: "sine" });
+  },
+  bomb() {
+    playTone(105, 0.16, { volume: 0.055, type: "sawtooth", endFrequency: 42 });
+  },
+  win() {
+    [523, 659, 784, 1047].forEach((frequency, index) => playTone(frequency, 0.16, { delay: index * 0.09, volume: 0.032, type: "triangle" }));
+  },
+  fail() {
+    [392, 330, 262].forEach((frequency, index) => playTone(frequency, 0.18, { delay: index * 0.1, volume: 0.028, type: "sine" }));
+  }
+};
 
 function rogueUpgradeCount(id) {
   return gameMode === "rogue" ? rogueRun.upgrades.filter((upgradeId) => upgradeId === id).length : 0;
@@ -2031,6 +2098,7 @@ function useBombOnTray(targetIndex) {
   returnItemToShelf(targetItem);
   updateClearedShelfRows();
   score += 12;
+  sounds.bomb();
   toast("炸弹把目标退回货架");
   bombDrag = null;
   checkMatches();
@@ -2099,6 +2167,7 @@ function addToTray(item) {
     }
     trayItems.push(trayItem);
   });
+  sounds.pickup();
   updateClearedShelfRows();
 
   if (bundle.length > 1) {
@@ -2189,6 +2258,7 @@ function checkMatches() {
       }
       const armedLinkedItem = armedLinkedItemForType(typeId);
       const removedItems = removeTrayTriple(typeId, armedLinkedItem?.uid || null);
+      sounds.match();
       const targetOrder = matchingOrders[0];
       launchDeliveryFlight(typeId, targetOrder.id);
       thawFrozenByMatch();
@@ -2347,6 +2417,7 @@ function resolveShipment(typeId, shippedItems = [], targetOrderId = null, shipme
     score += 45 + level * 8 + combo * 8;
 
     if (isOrderComplete(order)) {
+      sounds.order();
       combo += 1;
       completedOrders += 1;
       const bonus = order.kind === "rush" ? 80 : order.kind === "dual" ? 65 : order.kind === "bulk" ? 55 : 35;
@@ -2561,6 +2632,7 @@ function showRogueUpgradeChoices() {
 
 function win() {
   state = "won";
+  sounds.win();
   if (gameMode === "rogue" && rogueRun.floor < 6) {
     clearActiveSave();
     showRogueUpgradeChoices();
@@ -2583,6 +2655,7 @@ function fail(reason) {
   if (state !== "playing") return;
   recordDiagnostic("failure", `失败：${reason}`);
   state = "failed";
+  sounds.fail();
   clearActiveSave();
   const totalScore = runScore + score;
   const result = recordRunResult(level, totalScore);
@@ -2641,6 +2714,7 @@ function showHint() {
 
 function shakeBlocked(item) {
   shakeItems.add(item.uid);
+  sounds.blocked();
   toast("被上层货物挡住了");
   setTimeout(() => {
     shakeItems.delete(item.uid);
@@ -2649,6 +2723,7 @@ function shakeBlocked(item) {
 
 canvas.addEventListener("pointerdown", (event) => {
   if (state !== "playing") return;
+  ensureAudio();
   const point = canvasPoint(event);
   const selectedOrder = hitOrder(point);
   if (selectedOrder) {
@@ -2721,6 +2796,16 @@ reviveBtn.addEventListener("click", () => {
 pauseTutorialBtn.addEventListener("click", () => {
   pauseTutorialPanel.classList.toggle("is-hidden");
 });
+soundBtn.addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  try {
+    localStorage.setItem(SOUND_KEY, soundEnabled ? "on" : "off");
+  } catch (error) {
+    // The setting remains active for this session when storage is unavailable.
+  }
+  updateSoundButton();
+  if (soundEnabled) sounds.pickup();
+});
 document.addEventListener?.("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!diagnosticsOverlay.classList.contains("is-hidden")) {
@@ -2732,9 +2817,13 @@ document.addEventListener?.("keydown", (event) => {
   }
 });
 document.addEventListener?.("visibilitychange", () => {
-  if (document.hidden) saveActiveGame();
+  if (document.hidden) {
+    saveActiveGame();
+    audioContext?.suspend();
+  }
 });
 startBtn.addEventListener("click", () => {
+  ensureAudio();
   gameMode = "campaign";
   clearActiveSave();
   if (!startupParams.has("seed")) {
@@ -2745,6 +2834,7 @@ startBtn.addEventListener("click", () => {
   startLevel(requestedStartLevel);
 });
 rogueBtn.addEventListener("click", () => {
+  ensureAudio();
   gameMode = "rogue";
   clearActiveSave();
   runSeed = generateRunSeed();
@@ -2753,7 +2843,10 @@ rogueBtn.addEventListener("click", () => {
   startOverlay.classList.add("is-hidden");
   startLevel(1);
 });
-continueBtn.addEventListener("click", restoreActiveGame);
+continueBtn.addEventListener("click", () => {
+  ensureAudio();
+  restoreActiveGame();
+});
 tutorialBtn.addEventListener("click", () => {
   tutorialPanel.classList.toggle("is-hidden");
 });
@@ -2791,4 +2884,5 @@ requestedStartLevel = Math.max(1, Math.min(99, Number.parseInt(startupParams.get
 if (requestedStartLevel > 1) startBtn.textContent = `开始第 ${requestedStartLevel} 关`;
 startLevel(requestedStartLevel, "menu");
 refreshContinueButton();
+updateSoundButton();
 requestAnimationFrame(gameLoop);
