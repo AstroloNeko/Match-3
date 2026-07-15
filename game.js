@@ -136,6 +136,7 @@ let combo = 0;
 let currentConfig = levelConfig(1);
 let timeLeft = 75;
 let lastTick = 0;
+let lastFrameAt = 0;
 let state = "menu";
 let nextUid = 1;
 let nextOrderId = 1;
@@ -174,6 +175,7 @@ const rogueUpgrades = [
   { id: "insurance", name: "急单保险", description: "每层第一次急单超时不扣时间。" }
 ];
 let rogueInsuranceReady = false;
+let renderBlockedUids = null;
 let audioContext = null;
 let soundEnabled = true;
 
@@ -1054,6 +1056,7 @@ function restoreActiveGame() {
   messageUntil = 0;
   state = "playing";
   lastTick = performance.now();
+  lastFrameAt = 0;
   startOverlay.classList.add("is-hidden");
   overlay.classList.add("is-hidden");
   difficultyOverlay.classList.add("is-hidden");
@@ -1073,6 +1076,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   currentConfig = levelConfig(level);
   configureShelf(currentConfig);
   state = startState;
+  lastFrameAt = 0;
   overlay.classList.add("is-hidden");
   difficultyOverlay.classList.add("is-hidden");
   trayItems = [];
@@ -1504,10 +1508,26 @@ function pointInBounds(point, bounds, padding = 0) {
 }
 
 function isBlocked(item) {
+  if (renderBlockedUids) return renderBlockedUids.has(item.uid);
   return activeItems().some((other) => {
     if (other.uid === item.uid || other.layer <= item.layer) return false;
     return Math.abs(other.row - item.row) <= 1 && Math.abs(other.col - item.col) <= 1;
   });
+}
+
+function buildBlockedUidSet(active) {
+  const blocked = new Set();
+  active.forEach((item) => {
+    if (active.some((other) => (
+      other.uid !== item.uid &&
+      other.layer > item.layer &&
+      Math.abs(other.row - item.row) <= 1 &&
+      Math.abs(other.col - item.col) <= 1
+    ))) {
+      blocked.add(item.uid);
+    }
+  });
+  return blocked;
 }
 
 function itemDrawOrder(a, b) {
@@ -1917,6 +1937,7 @@ function drawDeliveryFlights(now) {
 }
 
 function render(now = performance.now()) {
+  renderBlockedUids = buildBlockedUidSet(activeItems());
   drawBackground();
   drawShelf(now);
   drawLinkedChains();
@@ -1926,6 +1947,7 @@ function render(now = performance.now()) {
   drawDeliveryFlights(now);
   drawClearanceSweep(now);
   drawMessages(now);
+  renderBlockedUids = null;
 }
 
 function queueMatchCheck(delay = 100) {
@@ -1967,6 +1989,12 @@ function updateEmergencyThaw(dt) {
 }
 
 function gameLoop(now) {
+  const frameInterval = state === "playing" || state === "clearing" ? 1000 / 30 : 1000 / 4;
+  if (lastFrameAt && now - lastFrameAt < frameInterval) {
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+  lastFrameAt = now;
   if (!lastTick) lastTick = now;
   const dt = Math.min(0.05, (now - lastTick) / 1000);
   lastTick = now;
