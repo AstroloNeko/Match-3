@@ -4,6 +4,7 @@ const ctx = canvas.getContext("2d");
 const levelText = document.getElementById("levelText");
 const itemsText = document.getElementById("itemsText");
 const timeText = document.getElementById("timeText");
+const timeLabel = document.getElementById("timeLabel");
 const overlay = document.getElementById("overlay");
 const modalKicker = document.getElementById("modalKicker");
 const modalTitle = document.getElementById("modalTitle");
@@ -17,6 +18,8 @@ const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
 const continueBtn = document.getElementById("continueBtn");
 const rogueBtn = document.getElementById("rogueBtn");
+const endlessBtn = document.getElementById("endlessBtn");
+const endlessSummary = document.getElementById("endlessSummary");
 const tutorialBtn = document.getElementById("tutorialBtn");
 const tutorialPanel = document.getElementById("tutorialPanel");
 const difficultyOverlay = document.getElementById("difficultyOverlay");
@@ -56,6 +59,8 @@ const ORDER_COUNT = 4;
 const LEADERBOARD_KEY = "match3ShelfLeaderboard";
 const SAVE_KEY = "match3ShelfActiveGameV1";
 const ROGUE_SAVE_KEY = "match3ShelfRogueRunV1";
+const ENDLESS_SAVE_KEY = "match3ShelfEndlessRunV1";
+const ENDLESS_RECORD_KEY = "match3ShelfEndlessRecordsV1";
 const SOUND_KEY = "match3ShelfSound";
 const MAX_BOMBS_PER_LEVEL = 3;
 const EMERGENCY_THAW_COOLDOWN = 1.15;
@@ -106,6 +111,20 @@ function levelConfig(levelNumber) {
     bombItemChance: Math.min(0.035 + spike * 0.012, 0.14),
     linkedItemChance: Math.min(0.1 + spike * 0.022, 0.3),
     freezeMatches: 1
+  };
+}
+
+function endlessLevelConfig(wave) {
+  const base = levelConfig(Math.min(12, 2 + Math.floor((wave - 1) / 2)));
+  return {
+    ...base,
+    rows: Math.min(14, 10 + Math.floor((wave - 1) / 3)),
+    cols: 8,
+    typeCount: Math.min(8, 5 + Math.floor((wave - 1) / 3)),
+    timeLimit: 0,
+    bombItemChance: Math.max(base.bombItemChance, Math.min(0.06 + wave * 0.008, 0.14)),
+    frozenItemChance: Math.min(base.frozenItemChance, 0.18),
+    linkedItemChance: Math.min(base.linkedItemChance, 0.22)
   };
 }
 
@@ -165,6 +184,7 @@ let pausePreviousState = "playing";
 let lastAutoSaveAt = 0;
 let gameMode = "campaign";
 let rogueRun = { floor: 1, upgrades: [] };
+let endlessRun = { wave: 1 };
 
 const rogueUpgrades = [
   { id: "slot", name: "扩建仓位", description: "本局后续楼层的卡槽永久 +1。" },
@@ -338,6 +358,14 @@ function updateLeaderboardPanel() {
   if (bestScoreText) bestScoreText.textContent = formatScore(board.bestScore);
   if (bestLevelText) bestLevelText.textContent = board.bestLevel;
   if (lastRunText) lastRunText.textContent = `${formatScore(board.lastScore)} / ${board.lastLevel}关`;
+  try {
+    const endless = JSON.parse(localStorage.getItem(ENDLESS_RECORD_KEY) || "null");
+    endlessSummary.textContent = endless
+      ? `纪录 ${endless.bestOrders || 0} 单 · ${formatScore(endless.bestScore || 0)} 分`
+      : "11 格卡槽，持续补货";
+  } catch (error) {
+    endlessSummary.textContent = "11 格卡槽，持续补货";
+  }
 }
 
 function recordRunResult(levelReached, totalScore) {
@@ -374,6 +402,31 @@ function renderModalRecord(totalScore, levelReached, result) {
       <p class="label">历史最佳</p>
       <strong>${formatScore(result.board.bestScore)}</strong>
     </div>
+  `;
+}
+
+function recordEndlessResult(totalScore) {
+  const scoreValue = Math.max(0, Math.round(totalScore));
+  let records = { bestOrders: 0, bestScore: 0, bestWave: 1 };
+  try {
+    records = { ...records, ...JSON.parse(localStorage.getItem(ENDLESS_RECORD_KEY) || "{}") };
+    records.bestOrders = Math.max(records.bestOrders, completedOrders);
+    records.bestScore = Math.max(records.bestScore, scoreValue);
+    records.bestWave = Math.max(records.bestWave, endlessRun.wave);
+    localStorage.setItem(ENDLESS_RECORD_KEY, JSON.stringify(records));
+    updateLeaderboardPanel();
+  } catch (error) {
+    // Keep the result visible even when persistent storage is unavailable.
+  }
+  return records;
+}
+
+function renderEndlessRecord(totalScore, records) {
+  modalRecord.classList.remove("is-hidden");
+  modalRecord.innerHTML = `
+    <div><p class="label">完成订单</p><strong>${completedOrders}</strong></div>
+    <div><p class="label">本局得分</p><strong>${formatScore(totalScore)}</strong></div>
+    <div><p class="label">历史最高</p><strong>${records.bestOrders}单</strong></div>
   `;
 }
 
@@ -427,6 +480,10 @@ function cleanupStrayGoods() {
 }
 
 function checkClearWin() {
+  if (gameMode === "endless" && !activeItems().some((item) => item.variant !== "bomb")) {
+    startNextEndlessWave();
+    return true;
+  }
   if (cleanupStrayGoods()) return true;
   if (remainingItemCount() === 0 && state === "playing") {
     items.forEach((item) => {
@@ -944,7 +1001,8 @@ function buildInitialItems() {
 
 function clearActiveSave() {
   try {
-    localStorage.removeItem(gameMode === "rogue" ? ROGUE_SAVE_KEY : SAVE_KEY);
+    const key = gameMode === "rogue" ? ROGUE_SAVE_KEY : gameMode === "endless" ? ENDLESS_SAVE_KEY : SAVE_KEY;
+    localStorage.removeItem(key);
   } catch (error) {
     // Storage can be unavailable in private browsing or embedded previews.
   }
@@ -953,7 +1011,7 @@ function clearActiveSave() {
 
 function readActiveSave() {
   try {
-    const saves = [SAVE_KEY, ROGUE_SAVE_KEY]
+    const saves = [SAVE_KEY, ROGUE_SAVE_KEY, ENDLESS_SAVE_KEY]
       .map((key) => JSON.parse(localStorage.getItem(key) || "null"))
       .filter((saved) => saved?.version === 1 && Array.isArray(saved.items) && Array.isArray(saved.orders));
     return saves.sort((a, b) => b.savedAt - a.savedAt)[0] || null;
@@ -966,7 +1024,13 @@ function refreshContinueButton() {
   const saved = readActiveSave();
   continueBtn.disabled = !saved;
   continueBtn.title = saved ? `继续第 ${saved.level} 关` : "暂无可继续的关卡";
-  continueBtn.textContent = saved ? `继续 L${saved.level}` : "继续";
+  continueBtn.textContent = saved
+    ? saved.gameMode === "endless"
+      ? `继续无尽 · 波次 ${saved.endlessRun?.wave || saved.level}`
+      : saved.gameMode === "rogue"
+        ? `继续肉鸽 · 第 ${saved.rogueRun?.floor || saved.level} 层`
+        : `继续主线 · 第 ${saved.level} 关`
+    : "暂无存档";
 }
 
 function saveActiveGame() {
@@ -998,10 +1062,12 @@ function saveActiveGame() {
     generationReport,
     gameMode,
     rogueRun,
+    endlessRun,
     rogueInsuranceReady
   };
   try {
-    localStorage.setItem(gameMode === "rogue" ? ROGUE_SAVE_KEY : SAVE_KEY, JSON.stringify(snapshot));
+    const key = gameMode === "rogue" ? ROGUE_SAVE_KEY : gameMode === "endless" ? ENDLESS_SAVE_KEY : SAVE_KEY;
+    localStorage.setItem(key, JSON.stringify(snapshot));
     refreshContinueButton();
   } catch (error) {
     // Keep the game playable when storage quota or browser policy blocks saves.
@@ -1015,13 +1081,14 @@ function restoreActiveGame() {
     return false;
   }
   level = Math.max(1, saved.level || 1);
-  gameMode = saved.gameMode === "rogue" ? "rogue" : "campaign";
+  gameMode = saved.gameMode === "rogue" ? "rogue" : saved.gameMode === "endless" ? "endless" : "campaign";
   rogueRun = saved.rogueRun || { floor: level, upgrades: [] };
+  endlessRun = saved.endlessRun || { wave: level };
   rogueInsuranceReady = Boolean(saved.rogueInsuranceReady);
   runSeed = normalizeSeed(saved.runSeed);
   initializeLevelRandom(level);
   randomState = saved.randomState || randomState;
-  currentConfig = levelConfig(level);
+  currentConfig = gameMode === "endless" ? endlessLevelConfig(endlessRun.wave) : levelConfig(level);
   configureShelf(currentConfig);
   items = saved.items;
   trayItems = saved.trayItems || [];
@@ -1073,14 +1140,16 @@ function startLevel(nextLevel = level, startState = "playing") {
   }
   level = nextLevel;
   initializeLevelRandom(level);
-  currentConfig = levelConfig(level);
+  currentConfig = gameMode === "endless" ? endlessLevelConfig(endlessRun.wave) : levelConfig(level);
   configureShelf(currentConfig);
   state = startState;
   lastFrameAt = 0;
   overlay.classList.add("is-hidden");
   difficultyOverlay.classList.add("is-hidden");
   trayItems = [];
-  tray.slots = Math.min(MAX_TRAY_SLOTS, BASE_TRAY_SLOTS + rogueUpgradeCount("slot"));
+  tray.slots = gameMode === "endless"
+    ? MAX_TRAY_SLOTS
+    : Math.min(MAX_TRAY_SLOTS, BASE_TRAY_SLOTS + rogueUpgradeCount("slot"));
   orders = [];
   queuedOrder = null;
   completedOrders = 0;
@@ -1100,7 +1169,7 @@ function startLevel(nextLevel = level, startState = "playing") {
   confetti = [];
   bombDrag = null;
   hoverItemUid = null;
-  timeLeft = currentConfig.timeLimit + rogueUpgradeCount("clock") * 12;
+  timeLeft = gameMode === "endless" ? 0 : currentConfig.timeLimit + rogueUpgradeCount("clock") * 12;
   rogueInsuranceReady = gameMode === "rogue" && rogueUpgradeCount("insurance") > 0;
   message = "";
   messageUntil = 0;
@@ -1117,6 +1186,39 @@ function startLevel(nextLevel = level, startState = "playing") {
   updateHud();
   updateLeaderboardPanel();
   if (state === "playing") saveActiveGame();
+}
+
+function startNextEndlessWave() {
+  const heldBombs = trayItems.filter((item) => item.variant === "bomb").length;
+  const carriedBombs = activeItems()
+    .filter((item) => item.variant === "bomb")
+    .slice(0, Math.max(0, MAX_BOMBS_PER_LEVEL - heldBombs))
+    .map((item) => ({ ...item, cleared: true, inTray: true, linkedUid: null }));
+  trayItems.push(...carriedBombs);
+  const uidOffset = Math.max(0, ...trayItems.map((item) => item.uid || 0));
+
+  endlessRun.wave += 1;
+  level = endlessRun.wave;
+  currentConfig = endlessLevelConfig(endlessRun.wave);
+  configureShelf(currentConfig);
+  clearanceSweep = null;
+  queuedOrder = null;
+  while (orders.length < ORDER_COUNT) orders.push(createOrder());
+  buildInitialItems();
+  items.forEach((item) => {
+    item.uid += uidOffset;
+    if (item.linkedUid) item.linkedUid += uidOffset;
+  });
+  nextUid += uidOffset;
+  trackableShelfRows = new Set(activeItems().map((item) => item.row));
+  if (!queuedOrder) queuedOrder = createOrderFromStock(preferredRefillType());
+  clearedShelfRows = new Map();
+  deliveryFlights = [];
+  state = "playing";
+  lastFrameAt = 0;
+  toast(`第 ${endlessRun.wave} 波到货 · 炸弹会持续补给`);
+  updateHud();
+  saveActiveGame();
 }
 
 function countTypes(source) {
@@ -1261,9 +1363,10 @@ function closePauseMenu() {
 }
 
 function updateHud() {
-  levelText.textContent = level;
+  levelText.textContent = gameMode === "endless" ? endlessRun.wave : level;
   itemsText.textContent = remainingItemCount();
-  timeText.textContent = Math.ceil(timeLeft);
+  timeLabel.textContent = gameMode === "endless" ? "订单" : "时间";
+  timeText.textContent = gameMode === "endless" ? completedOrders : Math.ceil(timeLeft);
   reviveBtn.textContent = tray.slots >= MAX_TRAY_SLOTS ? "已满级" : "卡槽+1";
   reviveBtn.disabled = tray.slots >= MAX_TRAY_SLOTS && state === "playing";
   reviveBtn.classList.toggle("is-hidden", state !== "playing" || tray.slots >= MAX_TRAY_SLOTS);
@@ -1295,7 +1398,12 @@ function drawBackground() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, W, H);
 
-  drawText(gameMode === "rogue" ? `肉鸽货架 · ${rogueRun.floor}/6` : "订单货架", W / 2, 42, 38, "#22313f", 800);
+  const title = gameMode === "rogue"
+    ? `肉鸽货架 · ${rogueRun.floor}/6`
+    : gameMode === "endless"
+      ? `无尽仓库 · 波次 ${endlessRun.wave}`
+      : "订单货架";
+  drawText(title, W / 2, 42, 38, "#22313f", 800);
   drawText(`订单三消，剩余货物 ${remainingItemCount()} 件，货架 ${shelf.cols}x${shelf.rows}`, W / 2, 76, 19, "#6b7886", 500);
   drawQueuedOrder();
   drawOrders();
@@ -1859,7 +1967,11 @@ function beginClearanceSweep(goods, cleaned) {
 function updateClearanceSweep(now) {
   if (!clearanceSweep || now - clearanceSweep.startedAt < clearanceSweep.duration) return;
   clearanceSweep = null;
-  win();
+  if (gameMode === "endless") {
+    startNextEndlessWave();
+  } else {
+    win();
+  }
 }
 
 function drawClearanceSweep(now) {
@@ -2000,10 +2112,10 @@ function gameLoop(now) {
   lastTick = now;
 
   if (state === "playing") {
-    timeLeft -= dt;
+    if (gameMode !== "endless") timeLeft -= dt;
     updateOrders(dt);
     updateEmergencyThaw(dt);
-    if (timeLeft <= 0) {
+    if (gameMode !== "endless" && timeLeft <= 0) {
       timeLeft = 0;
       fail("顾客等太久了");
     }
@@ -2687,9 +2799,20 @@ function fail(reason) {
   sounds.fail();
   clearActiveSave();
   const totalScore = runScore + score;
-  const result = recordRunResult(level, totalScore);
-  showModal("失败", reason, "可以重开，也可以模拟一次激励广告增加 1 个卡槽。", "看广告扩槽");
-  renderModalRecord(totalScore, level, result);
+  const endlessFailed = gameMode === "endless";
+  const result = endlessFailed ? null : recordRunResult(level, totalScore);
+  showModal(
+    endlessFailed ? "无尽仓库" : "失败",
+    reason,
+    endlessFailed ? `坚持到第 ${endlessRun.wave} 波，完成 ${completedOrders} 张订单。` : "可以重开，也可以模拟一次激励广告增加 1 个卡槽。",
+    endlessFailed ? "返回首页" : "看广告扩槽"
+  );
+  if (endlessFailed) secondaryBtn.textContent = "新开一局";
+  if (endlessFailed) {
+    renderEndlessRecord(totalScore, recordEndlessResult(totalScore));
+  } else {
+    renderModalRecord(totalScore, level, result);
+  }
 }
 
 function showModal(kicker, title, body, primaryLabel) {
@@ -2881,6 +3004,16 @@ rogueBtn.addEventListener("click", () => {
   startOverlay.classList.add("is-hidden");
   startLevel(1);
 });
+endlessBtn.addEventListener("click", () => {
+  ensureAudio();
+  gameMode = "endless";
+  clearActiveSave();
+  runSeed = generateRunSeed();
+  endlessRun = { wave: 1 };
+  runScore = 0;
+  startOverlay.classList.add("is-hidden");
+  startLevel(1);
+});
 continueBtn.addEventListener("click", () => {
   ensureAudio();
   restoreActiveGame();
@@ -2902,12 +3035,27 @@ primaryBtn.addEventListener("click", () => {
     } else {
       advanceToLevel(level + 1);
     }
+  } else if (gameMode === "endless") {
+    overlay.classList.add("is-hidden");
+    state = "menu";
+    startOverlay.classList.remove("is-hidden");
+    refreshContinueButton();
+    updateHud();
   } else {
     rewardSlot();
   }
 });
 
-secondaryBtn.addEventListener("click", () => startLevel(level));
+secondaryBtn.addEventListener("click", () => {
+  if (gameMode === "endless") {
+    runSeed = generateRunSeed();
+    endlessRun = { wave: 1 };
+    runScore = 0;
+    startLevel(1);
+  } else {
+    startLevel(level);
+  }
+});
 difficultyBtn.addEventListener("click", () => advanceToLevel(2));
 
 seedBtn.addEventListener("click", () => copyDebugText(buildReproductionUrl(), "复现链接已复制"));

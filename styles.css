@@ -290,10 +290,130 @@ button:active {
   margin-top: 12px;
 }
 
+.specialGuide {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 14px 0 4px;
+  text-align: left;
+}
+
+.specialGuide article {
+  padding: 10px;
+  border: 1px solid #e2d8c9;
+  border-radius: 7px;
+  background: #fffaf0;
+}
+
+.specialGuide strong,
+.specialGuide span {
+  display: block;
+}
+
+.specialGuide strong {
+  margin-bottom: 5px;
+  color: #34414d;
+  font-size: 13px;
+}
+
+.specialGuide span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .startPanel {
   width: min(100%, 430px);
   max-height: min(92vh, 760px);
   overflow: auto;
+}
+
+.titleLockup {
+  text-align: center;
+}
+
+.titleTiles {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.titleTiles span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  box-shadow: 0 6px 14px rgba(34, 49, 63, 0.18);
+  transform: rotate(-4deg);
+}
+
+.titleTiles span:nth-child(1) { background: #2c8a45; }
+.titleTiles span:nth-child(2) { background: #3f82d7; transform: translateY(-5px); }
+.titleTiles span:nth-child(3) { background: #d62839; transform: rotate(4deg); }
+
+.titleLockup .label {
+  margin-bottom: 5px;
+  color: #286f68;
+  font-weight: 900;
+}
+
+.titleLockup h1 {
+  margin-bottom: 7px;
+  font-size: 34px;
+}
+
+.titleLockup .intro {
+  margin: 0 auto 16px;
+}
+
+.continueButton,
+.tutorialButton {
+  width: 100%;
+}
+
+.continueButton { background: var(--accent); }
+
+.modeActions {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.modeButton {
+  min-height: 62px;
+  padding: 10px 14px;
+  background: #334451;
+  text-align: left;
+}
+
+.modeButton strong,
+.modeButton span {
+  display: block;
+}
+
+.modeButton strong {
+  margin-bottom: 4px;
+  font-size: 17px;
+}
+
+.modeButton span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.rogueModeButton { background: #286f68; }
+.endlessModeButton { background: #76512c; }
+
+.tutorialButton {
+  margin-top: 9px;
+  background: #66717d;
 }
 
 .startPanel h1,

@@ -31,6 +31,23 @@ globalThis.__testApi = {
       goodsByType,
       bombCount: items.filter((item) => item.variant === "bomb").length
     };
+  },
+  generateEndless: (seed, wave) => {
+    gameMode = "endless";
+    endlessRun = { wave };
+    runSeed = seed;
+    startLevel(wave, "menu");
+    const goodsByType = {};
+    items.filter((item) => item.variant !== "bomb").forEach((item) => {
+      goodsByType[item.typeId] = (goodsByType[item.typeId] || 0) + 1;
+    });
+    return {
+      report: JSON.parse(JSON.stringify(generationReport)),
+      goodsByType,
+      bombCount: items.filter((item) => item.variant === "bomb").length,
+      traySlots: tray.slots,
+      timeLimit: currentConfig.timeLimit
+    };
   }
 };
 `;
@@ -159,4 +176,15 @@ for (let index = 0; index < 120; index += 1) {
   assert.ok(generated.bombCount <= 3, `generated board ${index} must respect the bomb cap`);
 }
 
-console.log(`seed smoke test passed (120 boards, max attempts ${maxAttempts}, removed link pairs ${repairedLinkPairs}, removed frozen ${repairedFrozenItems})`);
+for (let wave = 1; wave <= 18; wave += 1) {
+  const generated = first.generateEndless(`ENDLESS-${wave}`, wave);
+  assert.equal(generated.report.valid, true, `endless wave ${wave} must have a playable path`);
+  Object.values(generated.goodsByType).forEach((count) => {
+    assert.equal(count % 3, 0, `endless wave ${wave} must preserve triple inventory`);
+  });
+  assert.ok(generated.bombCount >= 1 && generated.bombCount <= 3, `endless wave ${wave} must replenish capped bombs`);
+  assert.equal(generated.traySlots, 11, `endless wave ${wave} must start with 11 tray slots`);
+  assert.equal(generated.timeLimit, 0, `endless wave ${wave} must disable the total timer`);
+}
+
+console.log(`seed smoke test passed (120 campaign boards + 18 endless waves, max attempts ${maxAttempts}, removed link pairs ${repairedLinkPairs}, removed frozen ${repairedFrozenItems})`);

@@ -18,7 +18,7 @@
           <strong id="itemsText">0</strong>
         </div>
         <div>
-          <p class="label">时间</p>
+          <p id="timeLabel" class="label">时间</p>
           <strong id="timeText">60</strong>
         </div>
         <button id="pauseBtn" class="iconButton" type="button" aria-label="暂停" title="暂停">Ⅱ</button>
@@ -58,9 +58,27 @@
 
     <div id="startOverlay" class="startOverlay" role="dialog" aria-modal="true">
       <div class="startPanel">
-        <p class="label">Match-3 prototype</p>
-        <h1>订单货架</h1>
-        <p class="intro">按订单凑三消出货。本关牌堆固定，货架会越清越少；没有订单的三消会先卡在暂存槽里。</p>
+        <div class="titleLockup">
+          <div class="titleTiles" aria-hidden="true">
+            <span>植</span><span>书</span><span>杯</span>
+          </div>
+          <p class="label">ORDER SHELF</p>
+          <h1>订单货架</h1>
+          <p class="intro">看清遮挡，安排订单，把整座货架越消越空。</p>
+        </div>
+        <button id="continueBtn" class="continueButton" type="button">继续</button>
+        <div class="modeActions" aria-label="选择游戏模式">
+          <button id="startBtn" class="modeButton" type="button">
+            <strong>主线模式</strong><span>固定关卡与难度进阶</span>
+          </button>
+          <button id="rogueBtn" class="modeButton rogueModeButton" type="button">
+            <strong>肉鸽试验场</strong><span>六层物流强化构筑</span>
+          </button>
+          <button id="endlessBtn" class="modeButton endlessModeButton" type="button">
+            <strong>无尽仓库</strong><span id="endlessSummary">11 格卡槽，持续补货</span>
+          </button>
+        </div>
+        <button id="tutorialBtn" class="tutorialButton" type="button">玩法教程</button>
         <section class="leaderboard" aria-label="排行榜">
           <div>
             <p class="label">最高纪录</p>
@@ -75,12 +93,6 @@
             <strong id="lastRunText">0</strong>
           </div>
         </section>
-        <div class="startActions">
-          <button id="startBtn" type="button">新游戏</button>
-          <button id="continueBtn" type="button">继续</button>
-          <button id="rogueBtn" type="button">肉鸽模式</button>
-          <button id="tutorialBtn" type="button">玩法教程</button>
-        </div>
         <section id="tutorialPanel" class="tutorialPanel is-hidden" aria-label="玩法教程">
           <div class="tutorialGrid">
             <article>
@@ -129,7 +141,13 @@
       <div class="difficultyPanel">
         <p class="label">难度升级</p>
         <h1>真正的货架来了</h1>
-        <p>第 1 关只是热身。下一关货架会变大，订单更急，冰冻货、炸弹货和捆绑货会一起出现。</p>
+        <p>第 1 关只是热身。从下一关开始，特殊货物会同时带来风险与收益。</p>
+        <div class="specialGuide">
+          <article><strong>STAR · 星标</strong><span>参与出货立即奖励时间。</span></article>
+          <article><strong>ICE · 冰冻</strong><span>经历一次三消后解冻为冷链货。</span></article>
+          <article><strong>BOMB · 炸弹</strong><span>拖到卡槽商品上，把目标退回货架。</span></article>
+          <article><strong>链 · 捆绑</strong><span>点击一端会把相连商品一起带入卡槽。</span></article>
+        </div>
         <button id="difficultyBtn" type="button">进入第 2 关</button>
       </div>
     </div>
