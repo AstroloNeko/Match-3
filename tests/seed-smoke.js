@@ -48,6 +48,24 @@ globalThis.__testApi = {
       traySlots: tray.slots,
       timeLimit: currentConfig.timeLimit
     };
+  },
+  restockEndless: (seed) => {
+    gameMode = "endless";
+    endlessRun = { wave: 1 };
+    runSeed = seed;
+    startLevel(1, "menu");
+    const goods = items.filter((item) => item.variant !== "bomb");
+    goods.slice(12).forEach((item) => { item.cleared = true; });
+    const retainedUids = activeItems().filter((item) => item.variant !== "bomb").map((item) => item.uid);
+    startNextEndlessWave();
+    const activeUids = activeItems().map((item) => item.uid);
+    return {
+      wave: endlessRun.wave,
+      retained: retainedUids.every((uid) => activeUids.includes(uid)),
+      uniqueIds: new Set(activeUids).size === activeUids.length,
+      shelfGoods: activeItems().filter((item) => item.variant !== "bomb").length,
+      traySlots: tray.slots
+    };
   }
 };
 `;
@@ -186,5 +204,12 @@ for (let wave = 1; wave <= 18; wave += 1) {
   assert.equal(generated.traySlots, 11, `endless wave ${wave} must start with 11 tray slots`);
   assert.equal(generated.timeLimit, 0, `endless wave ${wave} must disable the total timer`);
 }
+
+const restocked = first.restockEndless("ENDLESS-RESTOCK");
+assert.equal(restocked.wave, 2, "endless restock must advance the wave counter");
+assert.equal(restocked.retained, true, "endless restock must retain the previous shelf tail");
+assert.equal(restocked.uniqueIds, true, "endless restock must preserve unique item ids");
+assert.ok(restocked.shelfGoods > 12, "endless restock must append goods before the shelf empties");
+assert.equal(restocked.traySlots, 11, "endless restock must preserve the 11-slot tray");
 
 console.log(`seed smoke test passed (120 campaign boards + 18 endless waves, max attempts ${maxAttempts}, removed link pairs ${repairedLinkPairs}, removed frozen ${repairedFrozenItems})`);

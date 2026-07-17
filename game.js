@@ -17,6 +17,9 @@ const reviveBtn = document.getElementById("reviveBtn");
 const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
 const continueBtn = document.getElementById("continueBtn");
+const campaignContinueBtn = document.getElementById("campaignContinueBtn");
+const rogueContinueBtn = document.getElementById("rogueContinueBtn");
+const endlessContinueBtn = document.getElementById("endlessContinueBtn");
 const rogueBtn = document.getElementById("rogueBtn");
 const endlessBtn = document.getElementById("endlessBtn");
 const endlessSummary = document.getElementById("endlessSummary");
@@ -480,7 +483,8 @@ function cleanupStrayGoods() {
 }
 
 function checkClearWin() {
-  if (gameMode === "endless" && !activeItems().some((item) => item.variant !== "bomb")) {
+  const shelfGoods = activeItems().filter((item) => item.variant !== "bomb").length;
+  if (gameMode === "endless" && shelfGoods <= 12) {
     startNextEndlessWave();
     return true;
   }
@@ -1020,8 +1024,20 @@ function readActiveSave() {
   }
 }
 
+function readModeSave(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    return saved?.version === 1 && Array.isArray(saved.items) && Array.isArray(saved.orders) ? saved : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function refreshContinueButton() {
   const saved = readActiveSave();
+  const campaignSave = readModeSave(SAVE_KEY);
+  const rogueSave = readModeSave(ROGUE_SAVE_KEY);
+  const endlessSave = readModeSave(ENDLESS_SAVE_KEY);
   continueBtn.disabled = !saved;
   continueBtn.title = saved ? `继续第 ${saved.level} 关` : "暂无可继续的关卡";
   continueBtn.textContent = saved
@@ -1031,6 +1047,12 @@ function refreshContinueButton() {
         ? `继续肉鸽 · 第 ${saved.rogueRun?.floor || saved.level} 层`
         : `继续主线 · 第 ${saved.level} 关`
     : "暂无存档";
+  campaignContinueBtn.disabled = !campaignSave;
+  campaignContinueBtn.textContent = campaignSave ? `主线 L${campaignSave.level}` : "主线存档";
+  rogueContinueBtn.disabled = !rogueSave;
+  rogueContinueBtn.textContent = rogueSave ? `肉鸽 ${rogueSave.rogueRun?.floor || rogueSave.level}层` : "肉鸽存档";
+  endlessContinueBtn.disabled = !endlessSave;
+  endlessContinueBtn.textContent = endlessSave ? `无尽 W${endlessSave.endlessRun?.wave || endlessSave.level}` : "无尽存档";
 }
 
 function saveActiveGame() {
@@ -1074,8 +1096,7 @@ function saveActiveGame() {
   }
 }
 
-function restoreActiveGame() {
-  const saved = readActiveSave();
+function restoreActiveGame(saved = readActiveSave()) {
   if (!saved) {
     refreshContinueButton();
     return false;
@@ -1189,34 +1210,41 @@ function startLevel(nextLevel = level, startState = "playing") {
 }
 
 function startNextEndlessWave() {
-  const heldBombs = trayItems.filter((item) => item.variant === "bomb").length;
-  const carriedBombs = activeItems()
-    .filter((item) => item.variant === "bomb")
-    .slice(0, Math.max(0, MAX_BOMBS_PER_LEVEL - heldBombs))
-    .map((item) => ({ ...item, cleared: true, inTray: true, linkedUid: null }));
-  trayItems.push(...carriedBombs);
-  const uidOffset = Math.max(0, ...trayItems.map((item) => item.uid || 0));
-
   endlessRun.wave += 1;
   level = endlessRun.wave;
   currentConfig = endlessLevelConfig(endlessRun.wave);
   configureShelf(currentConfig);
   clearanceSweep = null;
-  queuedOrder = null;
   while (orders.length < ORDER_COUNT) orders.push(createOrder());
-  buildInitialItems();
-  items.forEach((item) => {
-    item.uid += uidOffset;
-    if (item.linkedUid) item.linkedUid += uidOffset;
-  });
-  nextUid += uidOffset;
-  trackableShelfRows = new Set(activeItems().map((item) => item.row));
-  if (!queuedOrder) queuedOrder = createOrderFromStock(preferredRefillType());
-  clearedShelfRows = new Map();
+  const placements = emptyShelfPlacements();
+  const heldBombs = [...activeItems(), ...trayItems].filter((item) => item.variant === "bomb").length;
+  const bombCount = Math.min(MAX_BOMBS_PER_LEVEL - heldBombs, 1 + Math.floor((endlessRun.wave - 1) / 4));
+  const availableGoodsSlots = Math.max(0, placements.length - Math.max(0, bombCount));
+  const goodsCount = Math.floor(Math.min(36, availableGoodsSlots) / 3) * 3;
+  const orderTypes = [...new Set([...orders, queuedOrder].filter(Boolean).flatMap(orderTypeIds))];
+  const fallbackTypes = availableTypes();
+  const newGoods = [];
+  for (let index = 0; index < goodsCount; index += 1) {
+    const group = Math.floor(index / 3);
+    const typeId = orderTypes[group % Math.max(1, orderTypes.length)] || fallbackTypes[group % fallbackTypes.length];
+    newGoods.push(createItem(typeId, placements[index], {
+      solutionGroup: endlessRun.wave * 100 + group,
+      protectedFromSpecial: group < orderTypes.length,
+      variant: group < orderTypes.length ? "normal" : undefined
+    }));
+  }
+  normalizeGeneratedSpecials(newGoods);
+  applyLinkedPairs(newGoods);
+  const newBombs = placements
+    .slice(goodsCount, goodsCount + Math.max(0, bombCount))
+    .map((placement) => createItem(choice(fallbackTypes), placement, { variant: "bomb" }));
+  items.push(...newGoods, ...newBombs);
+  activeItems().forEach((item) => trackableShelfRows.add(item.row));
   deliveryFlights = [];
   state = "playing";
   lastFrameAt = 0;
-  toast(`第 ${endlessRun.wave} 波到货 · 炸弹会持续补给`);
+  toast(`持续补货 · 第 ${endlessRun.wave} 波到仓 +${newGoods.length}`);
+  stabilizeBoard();
   updateHud();
   saveActiveGame();
 }
@@ -3017,6 +3045,18 @@ endlessBtn.addEventListener("click", () => {
 continueBtn.addEventListener("click", () => {
   ensureAudio();
   restoreActiveGame();
+});
+campaignContinueBtn.addEventListener("click", () => {
+  ensureAudio();
+  restoreActiveGame(readModeSave(SAVE_KEY));
+});
+rogueContinueBtn.addEventListener("click", () => {
+  ensureAudio();
+  restoreActiveGame(readModeSave(ROGUE_SAVE_KEY));
+});
+endlessContinueBtn.addEventListener("click", () => {
+  ensureAudio();
+  restoreActiveGame(readModeSave(ENDLESS_SAVE_KEY));
 });
 tutorialBtn.addEventListener("click", () => {
   tutorialPanel.classList.toggle("is-hidden");

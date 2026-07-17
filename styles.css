@@ -379,6 +379,25 @@ button:active {
 
 .continueButton { background: var(--accent); }
 
+.saveSlotActions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.saveSlotActions button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px;
+  background: #65727e;
+  font-size: 11px;
+}
+
+.saveSlotActions button:disabled {
+  display: none;
+}
+
 .modeActions {
   display: grid;
   gap: 8px;
