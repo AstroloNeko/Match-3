@@ -34,7 +34,7 @@ globalThis.__testApi = {
   },
   generateEndless: (seed, wave) => {
     gameMode = "endless";
-    endlessRun = { wave };
+    endlessRun = { wave, nextRestockAt: 5 };
     runSeed = seed;
     startLevel(wave, "menu");
     const goodsByType = {};
@@ -51,20 +51,25 @@ globalThis.__testApi = {
   },
   restockEndless: (seed) => {
     gameMode = "endless";
-    endlessRun = { wave: 1 };
+    endlessRun = { wave: 1, nextRestockAt: 5 };
     runSeed = seed;
     startLevel(1, "menu");
     const goods = items.filter((item) => item.variant !== "bomb");
     goods.slice(12).forEach((item) => { item.cleared = true; });
     const retainedUids = activeItems().filter((item) => item.variant !== "bomb").map((item) => item.uid);
+    const beforeUids = new Set(activeItems().map((item) => item.uid));
     startNextEndlessWave();
     const activeUids = activeItems().map((item) => item.uid);
+    const addedGoods = activeItems().filter((item) => item.variant !== "bomb" && !beforeUids.has(item.uid));
     return {
       wave: endlessRun.wave,
       retained: retainedUids.every((uid) => activeUids.includes(uid)),
       uniqueIds: new Set(activeUids).size === activeUids.length,
       shelfGoods: activeItems().filter((item) => item.variant !== "bomb").length,
-      traySlots: tray.slots
+      traySlots: tray.slots,
+      addedTypeCount: new Set(addedGoods.map((item) => item.typeId)).size,
+      addedFrozen: addedGoods.filter((item) => item.variant === "frozen").length,
+      addedLinked: addedGoods.filter((item) => item.variant === "linked").length
     };
   }
 };
@@ -211,5 +216,6 @@ assert.equal(restocked.retained, true, "endless restock must retain the previous
 assert.equal(restocked.uniqueIds, true, "endless restock must preserve unique item ids");
 assert.ok(restocked.shelfGoods > 12, "endless restock must append goods before the shelf empties");
 assert.equal(restocked.traySlots, 11, "endless restock must preserve the 11-slot tray");
+assert.ok(restocked.addedTypeCount >= 5, "endless restock must include types beyond the current order subset");
 
 console.log(`seed smoke test passed (120 campaign boards + 18 endless waves, max attempts ${maxAttempts}, removed link pairs ${repairedLinkPairs}, removed frozen ${repairedFrozenItems})`);
